@@ -44,6 +44,13 @@ internal sealed class LancamentoConfiguracao : IEntityTypeConfiguration<Lancamen
 
         lancamento.Property(linha => linha.CriadoEm).IsRequired();
 
+        // Nulo na maioria das linhas: so as pernas de transferencia apontam para alguma.
+        // Indice filtrado por isso — indexar as nulas seria pagar espaco e escrita pelas
+        // linhas que a consulta nunca procura.
+        lancamento.HasIndex(linha => linha.TransferenciaId)
+            .HasFilter("[TransferenciaId] IS NOT NULL")
+            .HasDatabaseName("IX_Lancamentos_TransferenciaId");
+
         // A rede embaixo da trava. Se a trava pessimista falhar — hint esquecido em algum
         // caminho novo, transacao aberta no nivel errado —, duas gravacoes concorrentes
         // que leram o mesmo saldo tentam gravar a mesma posicao, e o banco recusa a
