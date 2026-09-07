@@ -49,6 +49,26 @@ internal sealed record TransferenciaHttpResposta(
     string Origem,
     DateTimeOffset CriadaEm);
 
+internal sealed record LinhaDoExtratoHttp(
+    Guid Id,
+    long Sequencia,
+    string Tipo,
+    decimal Valor,
+    decimal Efeito,
+    decimal SaldoDepois,
+    string Descricao,
+    string Origem,
+    DateTimeOffset CriadoEm,
+    Guid? TransferenciaId);
+
+internal sealed record ExtratoHttp(
+    Guid ContaId,
+    string Numero,
+    DateTimeOffset De,
+    DateTimeOffset Ate,
+    IReadOnlyList<LinhaDoExtratoHttp> Linhas,
+    string? ProximaPagina);
+
 internal sealed record ConciliacaoHttp(
     Guid ContaId,
     string Numero,
@@ -143,6 +163,23 @@ internal static class Cliente
         pedido.Headers.Add("X-Operador", "operador:teste");
 
         return cliente.SendAsync(pedido);
+    }
+
+    public static Task<HttpResponseMessage> ExtratoBruto(
+        this HttpClient cliente,
+        Guid contaId,
+        string consulta = "") =>
+        cliente.GetAsync($"/contas/{contaId}/extrato{consulta}");
+
+    public static async Task<ExtratoHttp> Extrato(
+        this HttpClient cliente,
+        Guid contaId,
+        string consulta = "")
+    {
+        var resposta = await cliente.ExtratoBruto(contaId, consulta);
+        resposta.EnsureSuccessStatusCode();
+
+        return (await resposta.Content.ReadFromJsonAsync<ExtratoHttp>(Pedidos.Json))!;
     }
 
     public static Task<ConciliacaoHttp?> Conciliacao(this HttpClient cliente, Guid contaId) =>

@@ -2,6 +2,7 @@ using Banco.Api.Contas;
 using Banco.Api.Erros;
 using Banco.Aplicacao.Conciliacao;
 using Banco.Aplicacao.Contas;
+using Banco.Aplicacao.Extrato;
 using Banco.Aplicacao.Portas;
 using Banco.Aplicacao.Transferencias;
 using Banco.Api.Transferencias;
@@ -30,6 +31,7 @@ internal static class ServicosDoBanco
 
         servicos.AddScoped<IRepositorioDeContas, RepositorioDeContas>();
         servicos.AddScoped<IConciliacaoDeLedger, ConciliacaoDeLedger>();
+        servicos.AddScoped<IExtratoDaConta, ExtratoDaConta>();
         servicos.AddScoped<IRepositorioDeTransferencias, RepositorioDeTransferencias>();
         servicos.AddScoped<IUnidadeDeTrabalho, UnidadeDeTrabalho>();
 
@@ -39,6 +41,7 @@ internal static class ServicosDoBanco
         servicos.AddScoped<MudarEstadoDaConta>();
         servicos.AddScoped<ConsultarHistoricoDeEstado>();
         servicos.AddScoped<ConciliarConta>();
+        servicos.AddScoped<ConsultarExtrato>();
         servicos.AddScoped<TransferirEntreContas>();
         servicos.AddScoped<ConsultarTransferencia>();
 

@@ -63,6 +63,7 @@ aplicacao.Use(async (contexto, proximo) =>
 });
 
 aplicacao.MapearContas();
+aplicacao.MapearExtrato();
 aplicacao.MapearEstadoDaConta();
 aplicacao.MapearTransferencias();
 
