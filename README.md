@@ -7,14 +7,17 @@ sacando da mesma conta terminando do único jeito certo.
 
 ## Estado atual
 
-Fatia 1: conta, ledger, depósito, saque, saldo materializado e reconciliação.
+Fatias 1 e 2: conta, ledger, depósito, saque, saldo materializado, reconciliação e
+transferência atômica entre contas.
 
 ```
 POST /contas                        abre conta (nasce zerada)
 GET  /contas/{id}                   saldo, titular e quantidade de lançamentos
 POST /contas/{id}/depositos         credita (exige Idempotency-Key e X-Operador)
 POST /contas/{id}/saques            debita, recusando se não houver saldo
+POST /contas/{id}/transferencias    debita esta conta e credita outra, atomicamente
 GET  /contas/{id}/conciliacao       confere o saldo materializado contra o ledger
+GET  /transferencias/{id}           uma transferência pelo id
 ```
 
 O que já está escrito está testado; o que falta está listado no fim.
@@ -129,8 +132,8 @@ extrato que rodasse junto para proteger contra leitura fantasma — que aqui nã
 ninguém decide nada a partir de um conjunto de linhas.
 
 **O preço.** A trava só vale dentro de uma transação, então quem lê para movimentar tem que
-abrir uma. E quando a transferência entrar (fatia 2), duas contas serão travadas na mesma
-operação — o que exige ordem de aquisição fixa, senão `A→B` junto com `B→A` deadlocka.
+abrir uma. E a transferência trava duas contas na mesma operação — o que exige ordem de
+aquisição fixa, tratada na seção seguinte.
 
 ### A rede embaixo da trava
 
@@ -149,6 +152,56 @@ acontece se a segunda requisição decidiu depois de a primeira terminar.
 Com a trava, 4 dos 5 testes de concorrência passam; sem ela, os mesmos 4 falham. O quinto —
 saques em contas diferentes não disputam entre si — passa nos dois casos, e é isso mesmo que
 tem que acontecer.
+
+## A transferência
+
+Um débito na origem e um crédito no destino, dentro de uma transação só. Ou as duas linhas
+entram, ou nenhuma entra.
+
+### Débito antes do crédito
+
+O débito é o único dos dois que pode ser recusado, e ele acontece primeiro. Creditar antes
+deixaria o destino com dinheiro por um instante, e o tratamento de "não tinha saldo" viraria
+um desfazimento em vez de uma recusa. Tem teste de unidade que troca a ordem e verifica que
+o destino não encostou no dinheiro.
+
+Os dois lançamentos saem de um método só, no domínio. Se a montagem morasse no caso de uso,
+nada impediria um caminho novo de creditar valor diferente do que debitou.
+
+### Ordem de aquisição de trava
+
+É a parte que faz a trava pessimista funcionar em vez de travar o sistema sozinho.
+
+Uma transferência de A para B trava A e depois B. Uma de B para A, ao mesmo tempo, travaria
+B e depois A — e cada uma ficaria esperando a trava que a outra já tem. O SQL Server detecta,
+mata uma como vítima de deadlock, e uma operação perfeitamente correta vira erro 500.
+
+As contas são travadas **sempre na ordem do id**. Todo mundo pega as travas na mesma
+sequência, então quem chega depois espera na primeira e não no meio. A ordem em si não
+precisa significar nada — precisa só ser a mesma em todo processo, e a comparação de `Guid`
+no .NET é determinista e igual em qualquer máquina.
+
+Isso não é teoria. Dois testes disparam vinte pares cruzados de `A→B` com `B→A`, e um ciclo
+de três contas `A→B→C→A`, tudo ao mesmo tempo. **Com a ordem, passam em 1 segundo; sem ela,
+os dois falham e a suíte leva 17 segundos** — o tempo que o banco gasta detectando os
+deadlocks.
+
+### A chave do cliente não desce para as pernas
+
+A chave de idempotência vale por conta, e a perna de crédito cai numa conta que nunca viu
+essa chave. Gravá-la lá faria uma operação qualquer do dono do destino, que por acaso usasse
+a mesma chave, colidir com uma transferência que não tem nada a ver com ele.
+
+As pernas carregam uma chave derivada do id da transferência —
+`transferencia:{id}:debito` e `:credito` —, que nunca colide. A chave do cliente fica no
+registro da transferência, única dentro da conta de origem.
+
+### Por que a transferência é um registro próprio
+
+Poderia ser só dois lançamentos parecidos ligados por um id. Vira tabela por duas razões: a
+chave de idempotência é uma só para a operação inteira e precisa de um lugar onde caiba uma
+vez, não duas; e perguntar "o que aconteceu com esta transferência" não pode depender de
+adivinhar quais dois lançamentos, em contas diferentes, formavam o par.
 
 ## Idempotência
 
@@ -256,8 +309,6 @@ mostra na tela. No domínio é impedir que o lançamento exista, venha de onde v
 
 ## O que ainda não está aqui
 
-- **Transferência entre contas** — a fatia 2. É onde a ordem de aquisição de trava passa a
-  importar.
 - **Bloqueio e encerramento de conta** — a fatia 3. Hoje toda conta aceita movimentação.
 - **Extrato paginado com filtro de período** — a fatia 4. O índice
   `(ContaId, CriadoEm)` já está criado esperando por ele.
