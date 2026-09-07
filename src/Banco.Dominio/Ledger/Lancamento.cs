@@ -95,5 +95,17 @@ public sealed class Lancamento
     public Guid? TransferenciaId { get; private set; }
 
     /// <summary>Quanto este lancamento move o saldo, com sinal.</summary>
-    public decimal Efeito => Tipo == TipoDeLancamento.Credito ? Valor.Valor : -Valor.Valor;
+    public decimal Efeito => EfeitoDe(Tipo, Valor.Valor);
+
+    /// <summary>
+    /// O sinal que o tipo da ao valor.
+    /// </summary>
+    /// <remarks>
+    /// Estatico porque quem le o ledger sem montar a entidade — o extrato, por exemplo —
+    /// precisa da mesma conta. Repetir o <c>if</c> do lado de fora seria deixar duas
+    /// versoes da regra livres para divergirem, e a que divergisse seria a que inverte o
+    /// sinal de um debito.
+    /// </remarks>
+    public static decimal EfeitoDe(TipoDeLancamento tipo, decimal valor) =>
+        tipo == TipoDeLancamento.Credito ? valor : -valor;
 }
