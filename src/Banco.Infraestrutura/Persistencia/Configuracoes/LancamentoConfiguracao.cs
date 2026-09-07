@@ -67,8 +67,13 @@ internal sealed class LancamentoConfiguracao : IEntityTypeConfiguration<Lancamen
 
         // Extrato com filtro de periodo. Sem ele, filtrar por data numa conta com milhares
         // de lancamentos vira varredura de tudo que a conta ja teve.
-        lancamento.HasIndex(linha => new { linha.ContaId, linha.CriadoEm })
-            .HasDatabaseName("IX_Lancamentos_ContaId_CriadoEm");
+        //
+        // A sequencia entra como terceira coluna, e nao como coluna incluida: ela e o
+        // desempate do marcador de pagina, e o banco so consegue continuar a busca de onde
+        // parou se a ordem do indice for a mesma ordem do extrato. Como coluna incluida ela
+        // seria lida, mas nao ordenada, e cada pagina custaria uma ordenacao do periodo.
+        lancamento.HasIndex(linha => new { linha.ContaId, linha.CriadoEm, linha.Sequencia })
+            .HasDatabaseName("IX_Lancamentos_ContaId_CriadoEm_Sequencia");
 
         lancamento.HasOne<Conta>()
             .WithMany()
