@@ -17,12 +17,18 @@ namespace Banco.Dominio.Ledger;
 /// esgotado ser reconhecido como o mesmo deposito, e nao como um segundo.
 /// </param>
 /// <param name="Origem">Quem mandou fazer, para a auditoria.</param>
+/// <param name="TransferenciaId">
+/// Preenchido so quando o lancamento e perna de uma transferencia. E o que liga o debito de
+/// uma conta ao credito da outra — sem ele, os dois seriam movimentacoes avulsas que por
+/// acaso tem o mesmo valor.
+/// </param>
 public sealed record PedidoDeLancamento(
     Dinheiro Valor,
     string Descricao,
     string Origem,
     string ChaveIdempotencia,
-    DateTimeOffset Agora)
+    DateTimeOffset Agora,
+    Guid? TransferenciaId = null)
 {
     public const int TamanhoMaximoDaChave = 64;
     public const int TamanhoMaximoDaOrigem = 100;

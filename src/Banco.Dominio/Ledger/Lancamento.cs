@@ -44,7 +44,8 @@ public sealed class Lancamento
         string descricao,
         string origem,
         string chaveIdempotencia,
-        DateTimeOffset criadoEm)
+        DateTimeOffset criadoEm,
+        Guid? transferenciaId)
     {
         // GUID v7 e ordenado no tempo: como o SQL Server usa o indice agrupado da chave
         // primaria para ordenar as linhas em disco, GUID aleatorio espalharia a insercao
@@ -59,6 +60,7 @@ public sealed class Lancamento
         Origem = origem;
         ChaveIdempotencia = chaveIdempotencia;
         CriadoEm = criadoEm;
+        TransferenciaId = transferenciaId;
     }
 
     public Guid Id { get; private set; }
@@ -88,6 +90,9 @@ public sealed class Lancamento
     public string ChaveIdempotencia { get; private set; } = string.Empty;
 
     public DateTimeOffset CriadoEm { get; private set; }
+
+    /// <summary>A transferencia de que este lancamento e perna, se for.</summary>
+    public Guid? TransferenciaId { get; private set; }
 
     /// <summary>Quanto este lancamento move o saldo, com sinal.</summary>
     public decimal Efeito => Tipo == TipoDeLancamento.Credito ? Valor.Valor : -Valor.Valor;

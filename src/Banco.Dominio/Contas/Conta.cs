@@ -111,7 +111,8 @@ public sealed class Conta
             pedido.Descricao.Trim(),
             pedido.Origem.Trim(),
             pedido.ChaveIdempotencia,
-            pedido.Agora);
+            pedido.Agora,
+            pedido.TransferenciaId);
 
         // Saldo e sequencia so avancam depois que o lancamento existe. Se algo acima
         // lancasse, a conta ficaria com saldo que nenhuma linha do ledger justifica.
