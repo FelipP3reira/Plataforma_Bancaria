@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json.Serialization;
 using Banco.Api.Configuracao;
 using Banco.Api.Contas;
+using Banco.Api.Transferencias;
 using Serilog;
 
 // Em desenvolvimento os segredos vem do .env; em producao, das variaveis de ambiente do
@@ -51,6 +52,7 @@ aplicacao.Use(async (contexto, proximo) =>
 });
 
 aplicacao.MapearContas();
+aplicacao.MapearTransferencias();
 
 await aplicacao.RunAsync().ConfigureAwait(false);
 

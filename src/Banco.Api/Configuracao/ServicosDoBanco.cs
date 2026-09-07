@@ -3,6 +3,8 @@ using Banco.Api.Erros;
 using Banco.Aplicacao.Conciliacao;
 using Banco.Aplicacao.Contas;
 using Banco.Aplicacao.Portas;
+using Banco.Aplicacao.Transferencias;
+using Banco.Api.Transferencias;
 using Banco.Infraestrutura.Persistencia;
 using FluentValidation;
 using Microsoft.AspNetCore.Diagnostics;
@@ -28,15 +30,19 @@ internal static class ServicosDoBanco
 
         servicos.AddScoped<IRepositorioDeContas, RepositorioDeContas>();
         servicos.AddScoped<IConciliacaoDeLedger, ConciliacaoDeLedger>();
+        servicos.AddScoped<IRepositorioDeTransferencias, RepositorioDeTransferencias>();
         servicos.AddScoped<IUnidadeDeTrabalho, UnidadeDeTrabalho>();
 
         servicos.AddScoped<AbrirConta>();
         servicos.AddScoped<ConsultarConta>();
         servicos.AddScoped<MovimentarConta>();
         servicos.AddScoped<ConciliarConta>();
+        servicos.AddScoped<TransferirEntreContas>();
+        servicos.AddScoped<ConsultarTransferencia>();
 
         servicos.AddScoped<IValidator<PedidoDeAberturaHttp>, ValidadorDeAbertura>();
         servicos.AddScoped<IValidator<MovimentacaoHttp>, ValidadorDeMovimentacao>();
+        servicos.AddScoped<IValidator<TransferenciaHttp>, ValidadorDeTransferencia>();
 
         servicos.AddProblemDetails();
         servicos.AddExceptionHandler<TratamentoDeErrosDeDominio>();

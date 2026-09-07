@@ -62,6 +62,8 @@ public sealed partial class TratamentoDeErrosDeDominio : IExceptionHandler
     private static (int Status, string Titulo)? Traduzir(Exception excecao) => excecao switch
     {
         ContaNaoEncontradaException => (StatusCodes.Status404NotFound, "Conta nao encontrada"),
+        TransferenciaNaoEncontradaException =>
+            (StatusCodes.Status404NotFound, "Transferencia nao encontrada"),
 
         // 409 e nao 400: o pedido esta bem formado, o que impede e o estado da conta.
         SaldoInsuficienteException => (StatusCodes.Status409Conflict, "Saldo insuficiente"),

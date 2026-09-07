@@ -30,6 +30,15 @@ internal sealed record DetalheDaContaHttp(
     DateTimeOffset AbertaEm,
     DateTimeOffset AtualizadaEm);
 
+internal sealed record TransferenciaHttpResposta(
+    Guid Id,
+    Guid ContaOrigemId,
+    Guid ContaDestinoId,
+    decimal Valor,
+    string Descricao,
+    string Origem,
+    DateTimeOffset CriadaEm);
+
 internal sealed record ConciliacaoHttp(
     Guid ContaId,
     string Numero,
@@ -96,6 +105,29 @@ internal static class Cliente
 
     public static Task<ConciliacaoHttp?> Conciliacao(this HttpClient cliente, Guid contaId) =>
         cliente.GetFromJsonAsync<ConciliacaoHttp>($"/contas/{contaId}/conciliacao", Pedidos.Json);
+
+    public static Task<HttpResponseMessage> Transferir(
+        this HttpClient cliente,
+        Guid origemId,
+        Guid destinoId,
+        decimal valor,
+        string? chave = null,
+        string descricao = "transferencia",
+        string operador = "operador:teste")
+    {
+        var pedido = new HttpRequestMessage(HttpMethod.Post, $"/contas/{origemId}/transferencias")
+        {
+            Content = JsonContent.Create(new { contaDestinoId = destinoId, valor, descricao }),
+        };
+
+        pedido.Headers.Add("Idempotency-Key", chave ?? Pedidos.ChaveNova());
+        pedido.Headers.Add("X-Operador", operador);
+
+        return cliente.SendAsync(pedido);
+    }
+
+    public static Task<TransferenciaHttpResposta?> Transferencia(this HttpResponseMessage resposta) =>
+        resposta.Content.ReadFromJsonAsync<TransferenciaHttpResposta>(Pedidos.Json);
 
     public static Task<LancamentoHttp?> Lancamento(this HttpResponseMessage resposta) =>
         resposta.Content.ReadFromJsonAsync<LancamentoHttp>(Pedidos.Json);
