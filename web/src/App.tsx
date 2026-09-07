@@ -100,10 +100,6 @@ export default function App() {
         ) : (
           <Seguranca conta={conta} sessao={sessao} aoMudar={recarregar} />
         )}
-
-        <footer className="pt-4 text-center text-xs text-tinta/35">
-          Sem autenticação: <code>X-Operador</code> registra quem diz ser, e ninguém confere.
-        </footer>
       </main>
     </div>
   );

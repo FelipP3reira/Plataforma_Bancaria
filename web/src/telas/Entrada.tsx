@@ -6,8 +6,10 @@ import type { Sessao } from "../sessao";
 /**
  * A porta de entrada — e não uma tela de login.
  *
- * O aviso no rodapé não é enfeite: sem autenticação nas APIs, qualquer pessoa com o id de
- * uma conta entra nela. Uma tela de senha aqui não mudaria isso, só esconderia.
+ * Não há autenticação nas APIs: qualquer pessoa com o id de uma conta entra nela. Isso
+ * está registrado no README, entre as pendências, e não na tela — mas continua valendo, e
+ * é o motivo de não existir campo de senha aqui: um que não validasse nada seria pior do
+ * que nenhum.
  */
 export default function Entrada({ aoEntrar }: { aoEntrar: (sessao: Sessao) => void }) {
   const [titular, setTitular] = useState("");
@@ -80,13 +82,6 @@ export default function Entrada({ aoEntrar }: { aoEntrar: (sessao: Sessao) => vo
           Entrar
         </Botao>
       </div>
-
-      <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-900">
-        <strong className="block">Isto não é autenticação.</strong>
-        Não há senha nem token: quem souber o id de uma conta entra nela. As APIs aceitam
-        qualquer chamada, e é lá que a autorização precisaria morar. O campo{" "}
-        <code>X-Operador</code> registra quem diz ser, e ninguém confere.
-      </p>
     </main>
   );
 }

@@ -419,14 +419,16 @@ Nenhuma tela ajusta o saldo em memória depois de uma operação — todas relee
 calculado no cliente diverge do ledger no primeiro caso que a interface não previu, e o
 saldo é justamente o número que não pode estar errado aqui.
 
-### A tela de entrada não é login, e diz isso
+### A tela de entrada não é login
 
-Não há autenticação nas APIs. Quem sabe o id de uma conta entra nela. A tela avisa isso em
-texto, e o `X-Operador` sai como `web:<titular>` — no extrato dá para separar o que veio da
-interface do que veio do Core de Crédito (`credito:desembolso`) ou de um operador interno.
+Não há autenticação nas APIs: quem sabe o id de uma conta entra nela. Por isso a tela pede
+o id e não uma senha — um campo de senha que não validasse nada seria pior do que nenhum,
+porque passaria a impressão de que valida.
 
-Uma tela de senha que não validasse nada seria pior do que não ter: passaria a impressão de
-que valida.
+O `X-Operador` sai como `web:<titular>`. No extrato dá para separar o que veio da interface
+do que veio do Core de Crédito (`credito:desembolso`) ou de um operador interno.
+
+A lacuna está registrada em **O que ainda não está aqui**, que é onde ela pertence.
 
 ### A interface fala com as duas APIs, e o banco não chama o crédito
 
@@ -569,8 +571,8 @@ mostra na tela. No domínio é impedir que o lançamento exista, venha de onde v
 
 ## O que ainda não está aqui
 
-- **Autenticação e papéis.** É a maior lacuna, e a interface a torna visível: a tela de
-  entrada pede o id da conta e pronto. Enquanto não existirem, `X-Operador` é um substituto explícito —
+- **Autenticação e papéis.** É a maior lacuna: a tela de entrada pede o id da conta e
+  pronto, e as APIs aceitam qualquer chamada. Enquanto não existirem, `X-Operador` é um substituto explícito —
   ele identifica quem diz ser, e ninguém confere.
 - **Estorno.** O ledger já suporta (é uma linha em sentido contrário), mas não há rota.
 - **Reconciliação em lote.** Hoje a conferência é conta a conta, sob demanda. Uma varredura
