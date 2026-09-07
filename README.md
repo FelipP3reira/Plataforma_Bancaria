@@ -7,7 +7,8 @@ sacando da mesma conta terminando do único jeito certo.
 
 ## Estado atual
 
-Fatias 1 a 3: conta, ledger, movimentação, transferência atômica, bloqueio e encerramento.
+Completo: conta, ledger, movimentação, transferência atômica, bloqueio, encerramento,
+extrato paginado e o Core de Crédito usando a conta como produto.
 
 ```
 POST /contas                        abre conta (nasce zerada e ativa)
@@ -15,6 +16,7 @@ GET  /contas/{id}                   estado, saldo, titular e quantidade de lanç
 POST /contas/{id}/depositos         credita (exige Idempotency-Key e X-Operador)
 POST /contas/{id}/saques            debita, recusando se não houver saldo
 POST /contas/{id}/transferencias    debita esta conta e credita outra, atomicamente
+GET  /contas/{id}/extrato           paginado por marcador, com filtro de período
 GET  /contas/{id}/conciliacao       confere o saldo materializado contra o ledger
 
 POST /contas/{id}/bloqueio          impede movimentação, preservando a consulta
@@ -23,6 +25,11 @@ POST /contas/{id}/encerramento      encerra, exigindo saldo zero
 GET  /contas/{id}/estados           a trilha de mudanças de estado
 GET  /transferencias/{id}           uma transferência pelo id
 ```
+
+Em desenvolvimento há documentação navegável em **`/docs`** — dá para disparar as
+requisições dali. Fora de desenvolvimento ela não sobe: o contrato da API não é segredo,
+mas uma interface que dispara requisição de verdade não precisa estar exposta no servidor
+que guarda dinheiro.
 
 O que já está escrito está testado; o que falta está listado no fim.
 
@@ -44,8 +51,9 @@ dotnet ef database update --project src/Banco.Infraestrutura --startup-project s
 dotnet run --project src/Banco.Api
 ```
 
-O SQL Server sobe na porta **1434**, e não na 1433. O Core de Crédito roda o próprio banco
-na porta padrão, e os dois precisam subir juntos quando a integração entre eles entrar.
+O SQL Server sobe na porta **1434**, e não na 1433. O [Core de Crédito](https://github.com/FelipP3reira/Core_Credito)
+roda o próprio banco na porta padrão, e os dois sobem juntos quando se quer ver a
+integração funcionando.
 
 ### Testes
 
@@ -270,6 +278,105 @@ desbloquear exige motivo — quem liberou uma conta bloqueada por suspeita preci
 tanto quanto quem bloqueou —, e corpo obrigatório em `DELETE` é frágil: o próprio ASP.NET
 Core recusa inferir corpo nesse verbo, e proxies costumam descartá-lo.
 
+## O extrato
+
+Ordenado do mais recente para o mais antigo, filtrado por período, paginado por marcador.
+
+```
+GET /contas/{id}/extrato?de=2026-09-01T00:00:00Z&ate=2026-09-30T23:59:59Z&tamanho=50
+```
+
+A resposta traz as linhas e um `proximaPagina` — um texto opaco que o cliente devolve para
+continuar de onde parou. Quando ele vem nulo, acabou.
+
+### Marcador, e não `OFFSET`
+
+Extrato é uma lista que cresce por cima. Com `OFFSET`, um lançamento novo entre duas
+páginas empurra tudo para baixo e o cliente vê a mesma linha duas vezes — sem erro, sem
+aviso. O marcador ancora na linha, e não na contagem.
+
+O outro motivo é custo: `OFFSET 10000` faz o banco ler dez mil linhas para descartá-las. O
+marcador faz uma busca direta, e a página quinhentos custa o mesmo que a primeira.
+
+### O marcador tem duas colunas, e as duas são necessárias
+
+```
+(CriadoEm, Sequencia)
+```
+
+`CriadoEm` sozinho repete: o instante vem do relógio no começo do pedido, e dois lançamentos
+na mesma conta podem cair no mesmo tick. `Sequencia` sozinha não serve porque não é ela que
+ordena o extrato — a ordem é cronológica, e a sequência só desempata. Juntas formam ordem
+total, porque a sequência é única dentro da conta.
+
+O predicado sai escrito para o índice: a comparação principal em `CriadoEm`, e a sequência
+só no empate.
+
+```sql
+CriadoEm < @instante OR (CriadoEm = @instante AND Sequencia < @sequencia)
+```
+
+### O índice ganhou uma terceira coluna
+
+```
+IX_Lancamentos_ContaId_CriadoEm_Sequencia
+```
+
+A sequência entra como **coluna-chave**, e não como coluna incluída. Como coluna incluída
+ela seria lida, mas não ordenada, e cada página custaria uma ordenação do período inteiro.
+Sendo chave, a ordem do índice é a ordem do extrato e o banco continua a busca de onde
+parou.
+
+### Não há total de linhas, de propósito
+
+Contar o período inteiro é justamente a consulta que fica cara quando a conta tem milhares
+de lançamentos — e seria paga em toda página, para mostrar um número que muda entre uma
+página e outra. Em troca, a consulta pede `tamanho + 1` linhas: se vier a linha extra, há
+próxima página. Uma linha a mais resolve o que um `COUNT` custaria.
+
+### O saldo corrente não é recalculado
+
+Cada linha traz o `SaldoDepois` que foi gravado no momento do lançamento. O extrato mostra
+saldo corrente sem depender de o cliente ter pedido as páginas anteriores, e sem somar nada.
+
+### Tamanho fora da faixa é recusado, não aparado
+
+Cliente que pede 5.000 e recebe 200 sem aviso conclui que a conta só tem 200 lançamentos no
+período. O mesmo vale para marcador de outro período: paginar com ele andaria em cima de um
+recorte diferente do que gerou o marcador.
+
+### Conta bloqueada e conta encerrada continuam com extrato
+
+É o outro lado do bloqueio. Cortar o extrato tiraria a informação exatamente de quem precisa
+apurar a suspeita, e conta encerrada continua sendo auditável — a obrigação de guardar o
+histórico não acaba quando o cliente vai embora.
+
+## O empréstimo como produto da conta
+
+O [Core de Crédito](https://github.com/FelipP3reira/Core_Credito) analisa e concede; esta
+plataforma guarda o dinheiro. Contratado um empréstimo com uma conta daqui informada, ele
+vira movimentação normal desta conta:
+
+```
+desembolso        ->  POST /contas/{id}/depositos    +10.000,00
+parcela 1 paga    ->  POST /contas/{id}/saques        -1.779,24
+```
+
+Do lado de cá **nada foi adicionado para isso funcionar**. O crédito usa as mesmas rotas de
+depósito e saque que qualquer cliente usa, com o mesmo `Idempotency-Key` e o mesmo
+`X-Operador` — que aparece no extrato como `credito:desembolso` e `credito:pagamento`, e é
+o que permite auditar depois quem mandou movimentar.
+
+Isso é resultado do desenho, e não sorte: a idempotência mora na conta e vale para qualquer
+chamador, então o crédito consegue repetir um desembolso interrompido sem creditar duas
+vezes. A chave que ele apresenta é derivada do contrato, e o raciocínio inteiro está
+documentado do lado de lá.
+
+O que a plataforma faz questão de continuar fazendo: se a conta não tem saldo para a
+parcela, o saque é recusado com 409 e o crédito trata isso como recusa — a parcela fica em
+aberto. Conta bloqueada recusa desembolso e cobrança do mesmo jeito, porque a verificação
+mora no agregado, no caminho de todo lançamento, e não em cada chamador.
+
 ## Idempotência
 
 Toda operação financeira exige `Idempotency-Key`. A chave fica gravada na linha do ledger, e
@@ -374,16 +481,15 @@ mostra na tela. No domínio é impedir que o lançamento exista, venha de onde v
 - Segredos em `.env`, fora do git, com `.env.example` versionado.
 - HSTS e redirecionamento de HTTPS fora de desenvolvimento; `nosniff`, `no-referrer` e
   `DENY` de enquadramento em toda resposta.
+- A documentação navegável (`/docs`) só sobe em desenvolvimento.
+- O extrato não devolve a chave de idempotência do lançamento: ela é apresentada por quem
+  movimenta e não faz parte do que o cliente precisa ver.
 - O registro de requisição fica por fora do tratador de erros, para enxergar o status final:
   por dentro, uma conta inexistente apareceria no log como 500 com pilha inteira em vez do
   404 que o cliente recebeu.
 
 ## O que ainda não está aqui
 
-- **Extrato paginado com filtro de período** — a fatia 4. O índice
-  `(ContaId, CriadoEm)` já está criado esperando por ele.
-- **Integração com o Core de Crédito** — a fatia 5. O empréstimo vira produto da conta:
-  contratar credita o cliente, cada parcela paga debita.
 - **Autenticação e papéis.** Enquanto não existirem, `X-Operador` é um substituto explícito —
   ele identifica quem diz ser, e ninguém confere.
 - **Estorno.** O ledger já suporta (é uma linha em sentido contrário), mas não há rota.
@@ -391,4 +497,6 @@ mostra na tela. No domínio é impedir que o lançamento exista, venha de onde v
   periódica de toda a base é outro problema — precisa de janela, de paginação e de um lugar
   para reportar.
 - **Limite por IP nas rotas de movimentação.**
+- **Filtro do extrato por tipo, valor ou origem.** Hoje o recorte é só por período.
+- **Extrato em arquivo** (CSV, PDF). Hoje sai só como JSON, pela rota.
 - Backup do banco: ainda não documentado.
