@@ -23,3 +23,6 @@ coverage/
 # Scripts locais de verificação, não fazem parte da entrega
 verificacao*
 bancada*
+
+# Log de execucao local da API
+*.log
