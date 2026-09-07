@@ -24,6 +24,22 @@ construtor.Services.AddSerilog((servicos, registro) => registro
 construtor.Services.ConfigureHttpJsonOptions(opcoes =>
     opcoes.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
+
+// A interface web roda em outra origem, entao o navegador exige CORS. A lista de origens
+// vem da configuracao e nao tem curinga: `AllowAnyOrigin` com credenciais e recusado pelo
+// proprio ASP.NET, e sem credenciais ele ainda abriria a API para qualquer pagina da
+// internet chamar em nome de quem estivesse com ela aberta.
+//
+// Fora de desenvolvimento, sem origens configuradas nada e liberado — o padrao e negar.
+const string PoliticaDaWeb = "web";
+
+var origensDaWeb = construtor.Configuration.GetSection("Web:Origens").Get<string[]>() ?? [];
+
+construtor.Services.AddCors(opcoes => opcoes.AddPolicy(PoliticaDaWeb, politica => politica
+    .WithOrigins(origensDaWeb)
+    .AllowAnyHeader()
+    .AllowAnyMethod()));
+
 construtor.Services.AddOpenApi();
 construtor.Services.AdicionarBanco();
 
@@ -64,6 +80,8 @@ aplicacao.Use(async (contexto, proximo) =>
 
     await proximo().ConfigureAwait(false);
 });
+
+aplicacao.UseCors(PoliticaDaWeb);
 
 aplicacao.MapearContas();
 aplicacao.MapearExtrato();
