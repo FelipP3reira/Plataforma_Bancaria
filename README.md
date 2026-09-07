@@ -7,16 +7,20 @@ sacando da mesma conta terminando do único jeito certo.
 
 ## Estado atual
 
-Fatias 1 e 2: conta, ledger, depósito, saque, saldo materializado, reconciliação e
-transferência atômica entre contas.
+Fatias 1 a 3: conta, ledger, movimentação, transferência atômica, bloqueio e encerramento.
 
 ```
-POST /contas                        abre conta (nasce zerada)
-GET  /contas/{id}                   saldo, titular e quantidade de lançamentos
+POST /contas                        abre conta (nasce zerada e ativa)
+GET  /contas/{id}                   estado, saldo, titular e quantidade de lançamentos
 POST /contas/{id}/depositos         credita (exige Idempotency-Key e X-Operador)
 POST /contas/{id}/saques            debita, recusando se não houver saldo
 POST /contas/{id}/transferencias    debita esta conta e credita outra, atomicamente
 GET  /contas/{id}/conciliacao       confere o saldo materializado contra o ledger
+
+POST /contas/{id}/bloqueio          impede movimentação, preservando a consulta
+POST /contas/{id}/desbloqueio       volta a movimentar
+POST /contas/{id}/encerramento      encerra, exigindo saldo zero
+GET  /contas/{id}/estados           a trilha de mudanças de estado
 GET  /transferencias/{id}           uma transferência pelo id
 ```
 
@@ -203,6 +207,69 @@ chave de idempotência é uma só para a operação inteira e precisa de um luga
 vez, não duas; e perguntar "o que aconteceu com esta transferência" não pode depender de
 adivinhar quais dois lançamentos, em contas diferentes, formavam o par.
 
+## Estado da conta
+
+```
+Ativa ⇄ Bloqueada
+  │         │
+  └────┬────┘
+       ▼
+   Encerrada
+```
+
+A tabela de transições é explícita, e a ausência de uma aresta é proibição, não omissão. Com
+condicionais espalhadas pelos métodos, "a conta encerrada pode voltar?" viraria uma pergunta
+que só o depurador responde. Tem teste que percorre os nove pares do produto cartesiano
+contra uma cópia da tabela escrita à parte — divergência entre as duas versões acusa erro de
+digitação na real.
+
+### Bloqueio impede movimentar, não consultar
+
+Bloquear não mexe no ledger nem no saldo: a dívida e o histórico continuam exatamente onde
+estavam, e o extrato continua consultável. O que muda é só a permissão de gravar linha nova.
+
+**Crédito também é barrado**, e não só débito. Conta sob investigação que ainda recebe
+dinheiro vira caixa de passagem justamente enquanto está sendo investigada. Efeito colateral
+útil: isso barra transferência com destino bloqueado sem que a transferência precise saber
+que existe bloqueio — a conferência mora no agregado, no caminho de todo lançamento.
+
+Numa conta bloqueada e sem dinheiro, a recusa é do bloqueio e não do saldo. A ordem das
+conferências é deliberada: o bloqueio é o problema real, e o saldo é consequência de nada.
+
+### Encerrar exige saldo zero
+
+Encerrar com saldo deixaria dinheiro sem dono numa conta que ninguém mais movimenta. Quem
+quer fechar tira o dinheiro antes — e essa saída vira lançamento, como qualquer outra.
+
+`Encerrada` é terminal. Reabrir apagaria o motivo do encerramento; quem quiser voltar a ter
+conta abre outra, e as duas histórias ficam separadas.
+
+### A trilha de estados é append-only, como o ledger
+
+Bloqueio por suspeita é um evento que alguém vai ter que explicar depois. Guardar só o estado
+atual responderia "está bloqueada" sem responder desde quando, por quê, nem a mando de quem —
+então cada mudança grava uma linha com motivo, operador e instante, e motivo é obrigatório.
+
+A trilha é ordenada por sequência, e não por data: bloquear e desbloquear na mesma requisição
+gravariam o mesmo instante, e a ordem sairia indefinida justamente onde precisa ser lida como
+sequência.
+
+Mudar estado passa pela **mesma trava** das movimentações. Bloquear enquanto um saque está no
+meio do caminho é exatamente o momento em que o bloqueio precisa funcionar: sem a trava, o
+saque leria a conta ativa, o bloqueio gravaria, e o saque gravaria depois — dinheiro saindo
+de uma conta que já estava bloqueada.
+
+Não há chave de idempotência aqui: a operação já é idempotente por construção. Bloquear duas
+vezes, a segunda é recusada pela máquina de estados, porque `Bloqueada` não vai para
+`Bloqueada`.
+
+### Desbloqueio é POST, não DELETE do bloqueio
+
+`DELETE /contas/{id}/bloqueio` seria mais expressivo, e foi a primeira versão. Mas
+desbloquear exige motivo — quem liberou uma conta bloqueada por suspeita precisa explicar
+tanto quanto quem bloqueou —, e corpo obrigatório em `DELETE` é frágil: o próprio ASP.NET
+Core recusa inferir corpo nesse verbo, e proxies costumam descartá-lo.
+
 ## Idempotência
 
 Toda operação financeira exige `Idempotency-Key`. A chave fica gravada na linha do ledger, e
@@ -295,8 +362,12 @@ mostra na tela. No domínio é impedir que o lançamento exista, venha de onde v
 - Toda operação financeira exige `Idempotency-Key`, e a chave fica gravada.
 - Toda operação financeira exige `X-Operador`, gravado em cada lançamento — quem fez e
   quando ficam no ledger, não só no log.
-- Ledger é append-only: não existe caminho de alteração nem de exclusão, e a chave
-  estrangeira é `Restrict` — conta encerrada continua tendo extrato.
+- Ledger e trilha de estados são append-only: não existe caminho de alteração nem de
+  exclusão, e a chave estrangeira é `Restrict` — conta encerrada continua tendo extrato.
+- Bloqueio barra crédito e débito, inclusive transferência entrando. Conta sob investigação
+  não vira caixa de passagem.
+- Mudança de estado exige motivo e operador, e grava os dois. Bloqueio sem motivo não se
+  audita.
 - Saldo insuficiente é 409 e não 400: o pedido está bem formado, o que impede é o estado da
   conta.
 - Toda entrada validada no servidor com FluentValidation, e de novo no agregado.
@@ -309,7 +380,6 @@ mostra na tela. No domínio é impedir que o lançamento exista, venha de onde v
 
 ## O que ainda não está aqui
 
-- **Bloqueio e encerramento de conta** — a fatia 3. Hoje toda conta aceita movimentação.
 - **Extrato paginado com filtro de período** — a fatia 4. O índice
   `(ContaId, CriadoEm)` já está criado esperando por ele.
 - **Integração com o Core de Crédito** — a fatia 5. O empréstimo vira produto da conta:
