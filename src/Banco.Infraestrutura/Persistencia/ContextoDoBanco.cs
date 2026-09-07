@@ -21,6 +21,8 @@ public sealed class ContextoDoBanco : DbContext
 
     public DbSet<Transferencia> Transferencias => Set<Transferencia>();
 
+    public DbSet<MudancaDeEstadoDaConta> MudancasDeEstadoDaConta => Set<MudancaDeEstadoDaConta>();
+
     // Nome do parametro imposto pela assinatura da classe base.
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

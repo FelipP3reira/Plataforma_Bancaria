@@ -1,5 +1,6 @@
 using Banco.Aplicacao.Erros;
 using Banco.Aplicacao.Portas;
+using Banco.Dominio.Contas;
 
 namespace Banco.Aplicacao.Contas;
 
@@ -7,6 +8,7 @@ public sealed record DetalheDaConta(
     Guid Id,
     string Numero,
     string Titular,
+    EstadoDaConta Estado,
     decimal Saldo,
     long Lancamentos,
     DateTimeOffset AbertaEm,
@@ -30,6 +32,7 @@ public sealed class ConsultarConta
             conta.Id,
             conta.Numero.Texto,
             conta.Titular,
+            conta.Estado,
             conta.Saldo.Valor,
             conta.UltimaSequencia,
             conta.AbertaEm,

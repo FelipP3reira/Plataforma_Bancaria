@@ -30,6 +30,13 @@ public interface IRepositorioDeContas
 
     void Adicionar(Lancamento lancamento);
 
+    void Adicionar(MudancaDeEstadoDaConta mudanca);
+
+    /// <summary>A trilha de estados, em ordem de sequencia.</summary>
+    Task<IReadOnlyList<MudancaDeEstadoDaConta>> HistoricoDeEstado(
+        Guid contaId,
+        CancellationToken cancelamento);
+
     /// <summary>
     /// Devolve o lancamento que a chave ja produziu nesta conta, se houver.
     /// </summary>

@@ -41,6 +41,8 @@ internal sealed class ContaConfiguracao : IEntityTypeConfiguration<Conta>
             .IsRequired();
 
         conta.Property(linha => linha.UltimaSequencia).IsRequired();
+        conta.Property(linha => linha.Estado).HasConversion<int>();
+        conta.Property(linha => linha.SequenciaDeEstado).IsRequired();
 
         // O agregado nao carrega o ledger: uma conta com dez mil lancamentos nao pode ler
         // dez mil linhas para gravar a proxima. Por isso nao ha navegacao daqui para

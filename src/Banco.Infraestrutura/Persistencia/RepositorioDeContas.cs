@@ -40,7 +40,8 @@ public sealed class RepositorioDeContas : IRepositorioDeContas
         contexto.Contas
             .FromSql(
                 $"""
-                 SELECT [Id], [Numero], [Titular], [Saldo], [UltimaSequencia], [AbertaEm], [AtualizadaEm]
+                 SELECT [Id], [Numero], [Titular], [Saldo], [UltimaSequencia], [Estado],
+                        [SequenciaDeEstado], [AbertaEm], [AtualizadaEm]
                  FROM [Contas] WITH (UPDLOCK, ROWLOCK)
                  WHERE [Id] = {id}
                  """)
@@ -49,6 +50,22 @@ public sealed class RepositorioDeContas : IRepositorioDeContas
     public void Adicionar(Conta conta) => contexto.Contas.Add(conta);
 
     public void Adicionar(Lancamento lancamento) => contexto.Lancamentos.Add(lancamento);
+
+    public void Adicionar(MudancaDeEstadoDaConta mudanca) => contexto.MudancasDeEstadoDaConta.Add(mudanca);
+
+    /// <remarks>
+    /// Ordenado pela sequencia, e nao pela data: bloquear e desbloquear na mesma requisicao
+    /// gravariam o mesmo instante, e a trilha sairia em ordem indefinida.
+    /// </remarks>
+    public async Task<IReadOnlyList<MudancaDeEstadoDaConta>> HistoricoDeEstado(
+        Guid contaId,
+        CancellationToken cancelamento) =>
+        await contexto.MudancasDeEstadoDaConta
+            .AsNoTracking()
+            .Where(mudanca => mudanca.ContaId == contaId)
+            .OrderBy(mudanca => mudanca.Sequencia)
+            .ToListAsync(cancelamento)
+            .ConfigureAwait(false);
 
     public Task<Lancamento?> PorChaveDeIdempotencia(
         Guid contaId,
