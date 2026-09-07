@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+/* Paleta sóbria de propósito: é uma tela que mostra dinheiro, e nada aqui precisa
+   chamar atenção além do saldo e dos avisos de recusa. */
+@theme {
+  --color-tinta: oklch(0.21 0.02 250);
+  --color-papel: oklch(0.98 0.004 250);
+  --color-borda: oklch(0.9 0.008 250);
+  --color-marca: oklch(0.48 0.13 250);
+  --color-credito: oklch(0.52 0.13 155);
+  --color-debito: oklch(0.55 0.17 25);
+}
+
+body {
+  background: var(--color-papel);
+  color: var(--color-tinta);
+}
+
+/* Tabular para valor: sem isso as colunas de dinheiro dançam de linha para linha. */
+.numero {
+  font-variant-numeric: tabular-nums;
+}
