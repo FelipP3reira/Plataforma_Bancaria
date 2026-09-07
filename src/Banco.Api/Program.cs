@@ -43,6 +43,9 @@ if (aplicacao.Environment.IsDevelopment())
 {
     aplicacao.MapOpenApi();
     aplicacao.MapScalarApiReference("/docs", opcoes => opcoes.WithTitle("Plataforma Bancaria"));
+
+    // A raiz existe so para nao devolver 404 a quem abre o endereco no navegador.
+    aplicacao.MapGet("/", () => Results.Redirect("/docs")).ExcludeFromDescription();
 }
 
 if (!aplicacao.Environment.IsDevelopment())
