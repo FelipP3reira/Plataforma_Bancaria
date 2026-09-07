@@ -26,10 +26,10 @@ GET  /contas/{id}/estados           a trilha de mudanças de estado
 GET  /transferencias/{id}           uma transferência pelo id
 ```
 
-Em desenvolvimento há documentação navegável em **`/docs`** — dá para disparar as
-requisições dali. Fora de desenvolvimento ela não sobe: o contrato da API não é segredo,
-mas uma interface que dispara requisição de verdade não precisa estar exposta no servidor
-que guarda dinheiro.
+Há uma **interface web** em `web/`: conta, extrato, transferência, empréstimo, bloqueio e
+a conciliação do ledger. E, em desenvolvimento, documentação navegável da API em **`/docs`**
+— fora de desenvolvimento ela não sobe: o contrato da API não é segredo, mas uma interface
+que dispara requisição de verdade não precisa estar exposta no servidor que guarda dinheiro.
 
 O que já está escrito está testado; o que falta está listado no fim.
 
@@ -54,6 +54,23 @@ dotnet run --project src/Banco.Api
 O SQL Server sobe na porta **1434**, e não na 1433. O [Core de Crédito](https://github.com/FelipP3reira/Core_Credito)
 roda o próprio banco na porta padrão, e os dois sobem juntos quando se quer ver a
 integração funcionando.
+
+### A interface
+
+Precisa de Node 20+. Com as duas APIs no ar:
+
+```bash
+cd web
+npm install
+npm run semear   # contas com movimento, transferências e um empréstimo em andamento
+npm run dev      # http://localhost:5173
+```
+
+`npm run semear` imprime os ids das contas criadas — é com eles que se entra no app.
+Sem ele o banco sobe vazio e não há o que olhar.
+
+A origem `http://localhost:5173` precisa estar em `Web__Origens__0` nos `.env` **das duas
+APIs**, senão o navegador barra as chamadas antes de elas saírem.
 
 ### Testes
 
@@ -377,6 +394,68 @@ parcela, o saque é recusado com 409 e o crédito trata isso como recusa — a p
 aberto. Conta bloqueada recusa desembolso e cobrança do mesmo jeito, porque a verificação
 mora no agregado, no caminho de todo lançamento, e não em cada chamador.
 
+## A interface
+
+React + TypeScript + Vite + Tailwind, em `web/`. Quatro abas: **Conta** (saldo e
+movimentação), **Extrato** (paginado, com filtro de período), **Empréstimos** e
+**Segurança** (bloqueio, trilha de estados e conciliação).
+
+### A chave de idempotência nasce com o formulário, não com o clique
+
+É o detalhe que faz o cabeçalho valer alguma coisa. A chave é gerada quando o formulário
+abre e **sobrevive ao erro**: se a primeira tentativa falhar por rede, a segunda vai com a
+mesma chave, e a API devolve o lançamento que já existe em vez de criar um segundo.
+
+Gerada dentro do clique, dois cliques virariam dois depósitos — exatamente o problema que
+`Idempotency-Key` existe para impedir. A tela mostra os primeiros caracteres da chave
+enquanto o formulário está aberto, para o comportamento ficar visível em vez de implícito.
+
+O mesmo vale para o pagamento de parcela: a chave é guardada por número de parcela, em um
+`useRef`, e reaproveitada entre tentativas.
+
+### O saldo é sempre relido do servidor
+
+Nenhuma tela ajusta o saldo em memória depois de uma operação — todas releem a conta. Saldo
+calculado no cliente diverge do ledger no primeiro caso que a interface não previu, e o
+saldo é justamente o número que não pode estar errado aqui.
+
+### A tela de entrada não é login, e diz isso
+
+Não há autenticação nas APIs. Quem sabe o id de uma conta entra nela. A tela avisa isso em
+texto, e o `X-Operador` sai como `web:<titular>` — no extrato dá para separar o que veio da
+interface do que veio do Core de Crédito (`credito:desembolso`) ou de um operador interno.
+
+Uma tela de senha que não validasse nada seria pior do que não ter: passaria a impressão de
+que valida.
+
+### A interface fala com as duas APIs, e o banco não chama o crédito
+
+A junção entre os dois serviços acontece **na borda de apresentação**. A dependência entre
+eles continua de mão única — crédito → banco —, e fazer o banco chamar o crédito para
+montar a aba de empréstimo criaria um ciclo entre os dois.
+
+Um BFF no meio seria a alternativa de manual. Não está aqui porque a única coisa que ele
+faria hoje é repassar duas chamadas, e uma peça a mais no caminho do dinheiro precisa
+pagar por si.
+
+### Recusa e falha não têm a mesma cara
+
+4xx é decisão da API — saldo insuficiente, conta bloqueada — e insistir não muda nada;
+o aviso é âmbar e mostra o motivo que veio no `ProblemDetails`. 5xx e API fora do ar são
+falha, aparecem em vermelho, e aí repetir faz sentido. Mostrar as duas iguais faria a
+pessoa insistir num pedido que nunca vai passar.
+
+### Os dados de demonstração entram pela porta da frente
+
+`npm run semear` cria as contas chamando as APIs como qualquer cliente, e não com `INSERT`
+no banco. Dado semeado por fora do domínio nasceria sem passar pela máquina de estados nem
+pelo ledger, e o app mostraria um saldo que a própria tela de conciliação recusaria.
+
+O que a semeadura **não** faz é espalhar os lançamentos no tempo: todos ficam com a data de
+hoje. O instante vem do relógio do servidor no momento do pedido, e não do corpo da
+requisição — deixar o cliente escolher a data de um lançamento seria abrir a porta para
+forjar extrato.
+
 ## Idempotência
 
 Toda operação financeira exige `Idempotency-Key`. A chave fica gravada na linha do ledger, e
@@ -490,7 +569,8 @@ mostra na tela. No domínio é impedir que o lançamento exista, venha de onde v
 
 ## O que ainda não está aqui
 
-- **Autenticação e papéis.** Enquanto não existirem, `X-Operador` é um substituto explícito —
+- **Autenticação e papéis.** É a maior lacuna, e a interface a torna visível: a tela de
+  entrada pede o id da conta e pronto. Enquanto não existirem, `X-Operador` é um substituto explícito —
   ele identifica quem diz ser, e ninguém confere.
 - **Estorno.** O ledger já suporta (é uma linha em sentido contrário), mas não há rota.
 - **Reconciliação em lote.** Hoje a conferência é conta a conta, sob demanda. Uma varredura
@@ -499,4 +579,8 @@ mostra na tela. No domínio é impedir que o lançamento exista, venha de onde v
 - **Limite por IP nas rotas de movimentação.**
 - **Filtro do extrato por tipo, valor ou origem.** Hoje o recorte é só por período.
 - **Extrato em arquivo** (CSV, PDF). Hoje sai só como JSON, pela rota.
+- **Testes da interface.** O back-end tem 167; a web não tem nenhum. O fluxo foi conferido
+  ponta a ponta com as duas APIs no ar, mas isso é conferência manual, não suíte.
+- **Responsividade em telas pequenas.** A tabela do extrato rola na horizontal e resolve,
+  mas não é um layout pensado para celular.
 - Backup do banco: ainda não documentado.
