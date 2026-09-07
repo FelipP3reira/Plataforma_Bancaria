@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Banco.Api.Configuracao;
 using Banco.Api.Contas;
 using Banco.Api.Transferencias;
+using Scalar.AspNetCore;
 using Serilog;
 
 // Em desenvolvimento os segredos vem do .env; em producao, das variaveis de ambiente do
@@ -23,6 +24,7 @@ construtor.Services.AddSerilog((servicos, registro) => registro
 construtor.Services.ConfigureHttpJsonOptions(opcoes =>
     opcoes.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
+construtor.Services.AddOpenApi();
 construtor.Services.AdicionarBanco();
 
 var aplicacao = construtor.Build();
@@ -33,6 +35,15 @@ var aplicacao = construtor.Build();
 aplicacao.UseSerilogRequestLogging();
 
 aplicacao.UseExceptionHandler();
+
+// Documentacao navegavel so fora de producao. O contrato da API nao e segredo, mas uma
+// interface que dispara requisicao de verdade nao precisa estar exposta no servidor que
+// guarda dinheiro.
+if (aplicacao.Environment.IsDevelopment())
+{
+    aplicacao.MapOpenApi();
+    aplicacao.MapScalarApiReference("/docs", opcoes => opcoes.WithTitle("Plataforma Bancaria"));
+}
 
 if (!aplicacao.Environment.IsDevelopment())
 {
