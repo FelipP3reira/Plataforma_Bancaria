@@ -34,6 +34,8 @@ public sealed class Conta
         Titular = titular.Trim();
         Saldo = Dinheiro.Zero;
         UltimaSequencia = 0;
+        Estado = EstadoDaConta.Ativa;
+        SequenciaDeEstado = 0;
         AbertaEm = agora;
         AtualizadaEm = agora;
     }
@@ -49,6 +51,15 @@ public sealed class Conta
 
     /// <summary>Sequencia do ultimo lancamento gravado nesta conta.</summary>
     public long UltimaSequencia { get; private set; }
+
+    /// <summary>
+    /// Ativa, bloqueada ou encerrada. So muda pelos metodos de intencao desta classe, que
+    /// passam todos pela <see cref="MaquinaDeEstadosDaConta"/> antes de gravar a trilha.
+    /// </summary>
+    public EstadoDaConta Estado { get; private set; }
+
+    /// <summary>Sequencia da ultima mudanca de estado. Contador proprio, separado do ledger.</summary>
+    public long SequenciaDeEstado { get; private set; }
 
     public DateTimeOffset AbertaEm { get; private set; }
 
@@ -75,6 +86,77 @@ public sealed class Conta
 
     public Lancamento Creditar(PedidoDeLancamento pedido) => Registrar(TipoDeLancamento.Credito, pedido);
 
+    /// <summary>
+    /// Impede novas movimentacoes, sem apagar nada.
+    /// </summary>
+    /// <remarks>
+    /// Bloqueio nao mexe no ledger nem no saldo: a divida e o historico continuam
+    /// exatamente onde estavam, e o extrato continua consultavel. O que muda e so a
+    /// permissao de gravar linha nova.
+    /// </remarks>
+    public MudancaDeEstadoDaConta Bloquear(string motivo, string origem, DateTimeOffset agora) =>
+        Transitar(EstadoDaConta.Bloqueada, motivo, origem, agora);
+
+    public MudancaDeEstadoDaConta Desbloquear(string motivo, string origem, DateTimeOffset agora) =>
+        Transitar(EstadoDaConta.Ativa, motivo, origem, agora);
+
+    /// <summary>
+    /// Encerra a conta, exigindo saldo zero.
+    /// </summary>
+    /// <remarks>
+    /// Encerrar com saldo deixaria dinheiro sem dono numa conta que ninguem mais consegue
+    /// movimentar. Quem quer fechar tira o dinheiro antes — e essa saida vira lancamento,
+    /// como qualquer outra.
+    /// </remarks>
+    public MudancaDeEstadoDaConta Encerrar(string motivo, string origem, DateTimeOffset agora)
+    {
+        if (!Saldo.EhZero)
+        {
+            throw new TransicaoInvalidaException(
+                $"Conta com saldo de {Saldo} nao pode ser encerrada.");
+        }
+
+        return Transitar(EstadoDaConta.Encerrada, motivo, origem, agora);
+    }
+
+    private MudancaDeEstadoDaConta Transitar(
+        EstadoDaConta destino,
+        string motivo,
+        string origem,
+        DateTimeOffset agora)
+    {
+        MaquinaDeEstadosDaConta.Garantir(Estado, destino);
+
+        if (string.IsNullOrWhiteSpace(motivo)
+            || motivo.Trim().Length > MudancaDeEstadoDaConta.TamanhoMaximoDoMotivo)
+        {
+            throw new ContaInvalidaException(
+                $"Motivo obrigatorio e de ate {MudancaDeEstadoDaConta.TamanhoMaximoDoMotivo} caracteres.");
+        }
+
+        if (string.IsNullOrWhiteSpace(origem)
+            || origem.Trim().Length > PedidoDeLancamento.TamanhoMaximoDaOrigem)
+        {
+            throw new ContaInvalidaException(
+                $"Origem obrigatoria e de ate {PedidoDeLancamento.TamanhoMaximoDaOrigem} caracteres.");
+        }
+
+        var mudanca = new MudancaDeEstadoDaConta(
+            Id,
+            SequenciaDeEstado + 1,
+            Estado,
+            destino,
+            motivo.Trim(),
+            origem.Trim(),
+            agora);
+
+        Estado = destino;
+        SequenciaDeEstado = mudanca.Sequencia;
+        AtualizadaEm = agora;
+
+        return mudanca;
+    }
+
     /// <exception cref="SaldoInsuficienteException">
     /// Quando o valor passa do saldo. Nao ha cheque especial: a conferencia acontece aqui,
     /// no agregado, e nao so na borda — assim nenhum caso de uso futuro consegue debitar
@@ -83,6 +165,13 @@ public sealed class Conta
     public Lancamento Debitar(PedidoDeLancamento pedido)
     {
         ArgumentNullException.ThrowIfNull(pedido);
+
+        // O estado vem antes do saldo: conta bloqueada e sem dinheiro tem que reclamar do
+        // bloqueio, que e o problema real, e nao do saldo, que e consequencia de nada.
+        if (!MaquinaDeEstadosDaConta.Movimenta(Estado))
+        {
+            throw new ContaBloqueadaException($"Conta {Estado} nao aceita movimentacao.");
+        }
 
         if (pedido.Valor > Saldo)
         {
@@ -97,6 +186,15 @@ public sealed class Conta
     {
         ArgumentNullException.ThrowIfNull(pedido);
         pedido.Validar();
+
+        // Vale para credito tambem, e nao so para debito: conta bloqueada por suspeita nao
+        // pode receber dinheiro, senao ela vira caixa de passagem justamente enquanto esta
+        // sob investigacao. Isso tambem barra transferencia com destino bloqueado, sem que
+        // a transferencia precise saber que existe bloqueio.
+        if (!MaquinaDeEstadosDaConta.Movimenta(Estado))
+        {
+            throw new ContaBloqueadaException($"Conta {Estado} nao aceita movimentacao.");
+        }
 
         var saldoDepois = tipo == TipoDeLancamento.Credito
             ? Saldo + pedido.Valor
