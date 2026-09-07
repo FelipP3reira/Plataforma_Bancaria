@@ -71,6 +71,10 @@ public sealed partial class TratamentoDeErrosDeDominio : IExceptionHandler
             (StatusCodes.Status409Conflict, "Chave de idempotencia reutilizada"),
         LedgerInconsistenteException => (StatusCodes.Status409Conflict, "Ledger inconsistente"),
 
+        // O pedido esta certo; o que impede e o estado em que a conta esta.
+        ContaBloqueadaException => (StatusCodes.Status409Conflict, "Conta nao movimenta"),
+        TransicaoInvalidaException => (StatusCodes.Status409Conflict, "Mudanca de estado invalida"),
+
         // Duas gravacoes concorrentes tentaram a mesma posicao do ledger. Se isto aparecer,
         // a trava pessimista falhou em algum caminho — e o indice unico segurou.
         DbUpdateException erro when EhViolacaoDeUnicidade(erro) =>

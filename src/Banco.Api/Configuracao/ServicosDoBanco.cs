@@ -36,6 +36,8 @@ internal static class ServicosDoBanco
         servicos.AddScoped<AbrirConta>();
         servicos.AddScoped<ConsultarConta>();
         servicos.AddScoped<MovimentarConta>();
+        servicos.AddScoped<MudarEstadoDaConta>();
+        servicos.AddScoped<ConsultarHistoricoDeEstado>();
         servicos.AddScoped<ConciliarConta>();
         servicos.AddScoped<TransferirEntreContas>();
         servicos.AddScoped<ConsultarTransferencia>();
@@ -43,6 +45,7 @@ internal static class ServicosDoBanco
         servicos.AddScoped<IValidator<PedidoDeAberturaHttp>, ValidadorDeAbertura>();
         servicos.AddScoped<IValidator<MovimentacaoHttp>, ValidadorDeMovimentacao>();
         servicos.AddScoped<IValidator<TransferenciaHttp>, ValidadorDeTransferencia>();
+        servicos.AddScoped<IValidator<MudancaDeEstadoHttp>, ValidadorDeMudancaDeEstado>();
 
         servicos.AddProblemDetails();
         servicos.AddExceptionHandler<TratamentoDeErrosDeDominio>();

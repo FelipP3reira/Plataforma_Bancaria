@@ -21,10 +21,20 @@ internal sealed record LancamentoHttp(
     string Origem,
     DateTimeOffset CriadoEm);
 
+internal sealed record MudancaDeEstadoHttpResposta(
+    Guid ContaId,
+    string De,
+    string Para,
+    long Sequencia,
+    string Motivo,
+    string Origem,
+    DateTimeOffset OcorridaEm);
+
 internal sealed record DetalheDaContaHttp(
     Guid Id,
     string Numero,
     string Titular,
+    string Estado,
     decimal Saldo,
     long Lancamentos,
     DateTimeOffset AbertaEm,
@@ -102,6 +112,38 @@ internal static class Cliente
 
     public static Task<DetalheDaContaHttp?> Detalhe(this HttpClient cliente, Guid contaId) =>
         cliente.GetFromJsonAsync<DetalheDaContaHttp>($"/contas/{contaId}", Pedidos.Json);
+
+    public static Task<HttpResponseMessage> Bloquear(this HttpClient cliente, Guid contaId, string motivo) =>
+        cliente.MudarEstado(HttpMethod.Post, $"/contas/{contaId}/bloqueio", motivo);
+
+    public static Task<HttpResponseMessage> Desbloquear(this HttpClient cliente, Guid contaId, string motivo) =>
+        cliente.MudarEstado(HttpMethod.Post, $"/contas/{contaId}/desbloqueio", motivo);
+
+    public static Task<HttpResponseMessage> Encerrar(this HttpClient cliente, Guid contaId, string motivo) =>
+        cliente.MudarEstado(HttpMethod.Post, $"/contas/{contaId}/encerramento", motivo);
+
+    public static Task<IReadOnlyList<MudancaDeEstadoHttpResposta>?> HistoricoDeEstado(
+        this HttpClient cliente,
+        Guid contaId) =>
+        cliente.GetFromJsonAsync<IReadOnlyList<MudancaDeEstadoHttpResposta>>(
+            $"/contas/{contaId}/estados",
+            Pedidos.Json);
+
+    private static Task<HttpResponseMessage> MudarEstado(
+        this HttpClient cliente,
+        HttpMethod metodo,
+        string rota,
+        string motivo)
+    {
+        var pedido = new HttpRequestMessage(metodo, rota)
+        {
+            Content = JsonContent.Create(new { motivo }),
+        };
+
+        pedido.Headers.Add("X-Operador", "operador:teste");
+
+        return cliente.SendAsync(pedido);
+    }
 
     public static Task<ConciliacaoHttp?> Conciliacao(this HttpClient cliente, Guid contaId) =>
         cliente.GetFromJsonAsync<ConciliacaoHttp>($"/contas/{contaId}/conciliacao", Pedidos.Json);

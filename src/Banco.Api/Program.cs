@@ -52,6 +52,7 @@ aplicacao.Use(async (contexto, proximo) =>
 });
 
 aplicacao.MapearContas();
+aplicacao.MapearEstadoDaConta();
 aplicacao.MapearTransferencias();
 
 await aplicacao.RunAsync().ConfigureAwait(false);
