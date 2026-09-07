@@ -13,7 +13,8 @@ import {
   type Sistema,
 } from "../api/credito";
 import { chaveNova, data, dinheiro } from "../api/cliente";
-import { Aviso, Botao, Campo, Cartao, Carregando, Vazio, entrada } from "../componentes/base";
+import { Aviso, Botao, Campo, Cartao, Carregando, entrada } from "../componentes/base";
+import * as Icone from "../componentes/icones";
 import type { Sessao } from "../sessao";
 
 export default function Emprestimos({
@@ -64,7 +65,15 @@ export default function Emprestimos({
           {contratos === null ? (
             <Carregando />
           ) : contratos.length === 0 ? (
-            <Vazio>Você não tem empréstimo nesta conta.</Vazio>
+            <div className="py-8 text-center">
+              <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-marca/8 text-marca">
+                <Icone.Cedula className="h-7 w-7" />
+              </span>
+              <p className="mt-4 font-medium">Nenhum empréstimo nesta conta</p>
+              <p className="mx-auto mt-1 max-w-xs text-sm text-tinta-fraca">
+                O valor aprovado cai direto aqui, e as parcelas saem desta mesma conta.
+              </p>
+            </div>
           ) : (
             <ul className="space-y-4">
               {contratos.map((contrato) => (
@@ -126,25 +135,33 @@ function Emprestimo({ contrato, aoMudar }: { contrato: ContratoDaConta; aoMudar:
   const progresso = pago > 0 ? (contrato.totalPago / pago) * 100 : 0;
 
   return (
-    <li className="rounded-lg border border-borda p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="numero text-lg font-semibold">{dinheiro(contrato.valorFinanciado)}</p>
-          <p className="text-xs text-tinta/55">
-            {contrato.prazoEmMeses}x · {contrato.sistema} ·{" "}
-            {(contrato.taxaMensal * 100).toFixed(2).replace(".", ",")}% ao mês
-          </p>
+    <li className="rounded-2xl border border-borda p-5">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-marca/8 text-marca">
+            <Icone.Cedula />
+          </span>
+          <div>
+            <p className="numero text-xl font-bold">{dinheiro(contrato.valorFinanciado)}</p>
+            <p className="text-xs text-tinta-fraca">
+              {contrato.prazoEmMeses}x · {contrato.sistema} ·{" "}
+              {(contrato.taxaMensal * 100).toFixed(2).replace(".", ",")}% ao mês
+            </p>
+          </div>
         </div>
         <div className="text-right">
-          <p className="text-xs text-tinta/50">Falta pagar</p>
-          <p className="numero font-semibold">{dinheiro(contrato.saldoAberto)}</p>
+          <p className="text-xs text-tinta-fraca">Falta pagar</p>
+          <p className="numero text-lg font-bold">{dinheiro(contrato.saldoAberto)}</p>
         </div>
       </div>
 
-      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-tinta/10">
-        <div className="h-full rounded-full bg-credito" style={{ width: `${progresso}%` }} />
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-papel">
+        <div
+          className="h-full rounded-full bg-entrada transition-[width] duration-500"
+          style={{ width: `${progresso}%` }}
+        />
       </div>
-      <p className="mt-1 text-xs text-tinta/50">
+      <p className="mt-1.5 text-xs text-tinta-fraca">
         {contrato.parcelasPagas} de {contrato.prazoEmMeses} parcelas pagas
       </p>
 
@@ -155,15 +172,15 @@ function Emprestimo({ contrato, aoMudar }: { contrato: ContratoDaConta; aoMudar:
       {!contrato.desembolsadoEm ? (
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <Botao disabled={ocupado} onClick={() => void agir(() => desembolsar(contrato.propostaId))}>
-            Receber o dinheiro na conta
+            Receber na conta
           </Botao>
-          <span className="text-xs text-tinta/45">
+          <span className="text-xs text-tinta-fraca">
             Contrato assinado e ainda não desembolsado.
           </span>
         </div>
       ) : contrato.estaQuitado ? (
-        <p className="mt-4 rounded-lg bg-credito/10 px-4 py-2 text-sm text-credito">
-          Empréstimo quitado.
+        <p className="mt-4 flex items-center gap-2 rounded-xl bg-entrada/8 px-4 py-2.5 text-sm font-medium text-entrada">
+          <Icone.Escudo className="h-4 w-4" /> Empréstimo quitado.
         </p>
       ) : (
         <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -181,7 +198,7 @@ function Emprestimo({ contrato, aoMudar }: { contrato: ContratoDaConta; aoMudar:
           >
             Pagar parcela {contrato.proxima.numero} · {dinheiro(contrato.proxima.valor ?? 0)}
           </Botao>
-          <span className="text-xs text-tinta/45">
+          <span className="text-xs text-tinta-fraca">
             vence em {contrato.proxima.vencimento ? data(contrato.proxima.vencimento) : "—"} · sai
             desta conta
           </span>
@@ -353,32 +370,41 @@ function PedirEmprestimo({
         ) : (
           <>
             <div
-              className={`rounded-lg px-4 py-3 ${
-                decisao?.aprovada ? "bg-credito/10 text-credito" : "bg-amber-50 text-amber-900"
+              className={`rounded-2xl px-5 py-4 ${
+                decisao?.aprovada ? "bg-entrada/8" : "bg-amber-50"
               }`}
             >
-              <strong className="block">
+              <strong
+                className={`block text-lg font-bold ${
+                  decisao?.aprovada ? "text-entrada" : "text-amber-900"
+                }`}
+              >
                 {decisao?.aprovada ? "Aprovado" : "Não aprovado"}
               </strong>
               {decisao?.aprovada && simulacao && (
-                <span className="text-sm text-tinta/70">
-                  {simulacao.prazoEmMeses}x de {dinheiro(simulacao.primeiraParcela)} · total de{" "}
-                  {dinheiro(simulacao.totalPago)} · juros de {dinheiro(simulacao.totalDeJuros)}
-                </span>
+                <p className="numero mt-1 text-sm text-tinta">
+                  {simulacao.prazoEmMeses}x de{" "}
+                  <strong>{dinheiro(simulacao.primeiraParcela)}</strong> · total{" "}
+                  {dinheiro(simulacao.totalPago)} · juros {dinheiro(simulacao.totalDeJuros)}
+                </p>
               )}
             </div>
 
             <div>
-              <p className="mb-2 text-xs font-medium text-tinta/60">
+              <p className="mb-2.5 text-xs font-semibold tracking-wide text-tinta-fraca uppercase">
                 Por que a resposta foi essa
               </p>
-              <ul className="space-y-1.5 text-sm">
+              <ul className="space-y-2 text-sm">
                 {decisao?.laudo.map((linha) => (
-                  <li key={linha.codigo} className="flex gap-2">
-                    <span className={linha.aprovou ? "text-credito" : "text-debito"}>
+                  <li key={linha.codigo} className="flex gap-2.5">
+                    <span
+                      className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold text-white ${
+                        linha.aprovou ? "bg-entrada" : "bg-saida"
+                      }`}
+                    >
                       {linha.aprovou ? "✓" : "✕"}
                     </span>
-                    <span className="text-tinta/70">{linha.motivo}</span>
+                    <span className="text-tinta-fraca">{linha.motivo}</span>
                   </li>
                 ))}
               </ul>
