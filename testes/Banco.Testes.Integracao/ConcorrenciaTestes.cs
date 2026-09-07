@@ -60,6 +60,59 @@ public class ConcorrenciaTestes
     }
 
     /// <summary>
+    /// Duas transferencias simultaneas sacando da mesma conta no limite do saldo, cada uma
+    /// para um destino diferente. So uma pode passar.
+    /// </summary>
+    /// <remarks>
+    /// O caso do saque duplo, mas com o dobro de contas envolvidas e a trava sendo pedida
+    /// em ordem: e aqui que a serializacao precisa valer mesmo com a segunda trava de cada
+    /// transferencia caindo em linhas diferentes. Sem a trava na origem, as duas leem cem,
+    /// as duas concluem que da, e o dinheiro que sai da origem e maior do que o que ela
+    /// tinha — com a agravante de ja ter sido creditado nos dois destinos.
+    /// <para>
+    /// A conferencia final e o ponto: a origem zera, e a soma dos dois destinos e
+    /// exatamente o que saiu dela. Dinheiro nao pode ser criado no caminho.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task DuasTransferenciasDoSaldoInteiroAoMesmoTempoSoDeixamUmaPassar()
+    {
+        var cliente = fabrica.CreateClient();
+        var origem = await cliente.ContaCom(100m);
+        var primeiroDestino = await cliente.ContaCom(0m);
+        var segundoDestino = await cliente.ContaCom(0m);
+
+        var partida = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var transferencias = new[] { primeiroDestino, segundoDestino }.Select(async destino =>
+        {
+            await partida.Task;
+            return await cliente.Transferir(origem, destino, 100m);
+        }).ToArray();
+
+        partida.SetResult();
+        var respostas = await Task.WhenAll(transferencias);
+
+        Assert.Equal(1, respostas.Count(resposta => resposta.StatusCode == HttpStatusCode.Created));
+
+        var recusada = Assert.Single(respostas, resposta => resposta.StatusCode == HttpStatusCode.Conflict);
+        Assert.Equal("Saldo insuficiente", await recusada.TituloDoProblema());
+
+        var saldoDaOrigem = (await cliente.Detalhe(origem))!.Saldo;
+        var recebido = (await cliente.Detalhe(primeiroDestino))!.Saldo
+            + (await cliente.Detalhe(segundoDestino))!.Saldo;
+
+        Assert.Equal(0m, saldoDaOrigem);
+        Assert.Equal(100m, recebido);
+
+        // A conta que recusou nao pode ter ficado com meia transferencia: ou as duas pernas
+        // entraram, ou nenhuma entrou.
+        Assert.True((await cliente.Conciliacao(origem))!.Bate);
+        Assert.True((await cliente.Conciliacao(primeiroDestino))!.Bate);
+        Assert.True((await cliente.Conciliacao(segundoDestino))!.Bate);
+    }
+
+    /// <summary>
     /// Dez saques simultaneos de dez reais numa conta com cinquenta: exatamente cinco
     /// passam. Prova que a trava serializa em vez de so reduzir a chance de colidir.
     /// </summary>

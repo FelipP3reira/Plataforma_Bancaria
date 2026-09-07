@@ -161,7 +161,7 @@ colidiam no índice único e um deles voltava 409 mesmo assim. Estava provando o
 trava. O teste hoje verifica o *motivo* da recusa: tem que ser "saldo insuficiente", que só
 acontece se a segunda requisição decidiu depois de a primeira terminar.
 
-Com a trava, 4 dos 5 testes de concorrência passam; sem ela, os mesmos 4 falham. O quinto —
+Com a trava, 5 dos 6 testes de concorrência passam; sem ela, os mesmos 5 falham. O sexto —
 saques em contas diferentes não disputam entre si — passa nos dois casos, e é isso mesmo que
 tem que acontecer.
 
