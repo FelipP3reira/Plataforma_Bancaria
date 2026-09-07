@@ -1,0 +1,25 @@
+services:
+  banco:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: plataforma-bancaria-banco
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${SENHA_SA}
+      MSSQL_PID: Developer
+    ports:
+      # 1434 e nao 1433: o Core de Credito roda o proprio SQL Server na porta padrao, e
+      # os dois precisam subir juntos para a integracao entre eles funcionar na maquina.
+      - "1434:1433"
+    volumes:
+      - dados-banco:/var/opt/mssql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -C -Q "SELECT 1"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+volumes:
+  dados-banco:

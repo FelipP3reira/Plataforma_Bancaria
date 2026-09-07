@@ -1,0 +1,20 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+trim_trailing_whitespace = true
+
+[*.cs]
+indent_size = 4
+
+[*.{json,yml,yaml,props,csproj,slnx}]
+indent_size = 2
+
+# Migracao e escrita pelo EF, nao por gente. Como o projeto trata aviso como erro,
+# sem esta marcacao uma regra de estilo em codigo gerado quebra o build inteiro.
+[**/Migracoes/*.cs]
+generated_code = true
+dotnet_analyzer_diagnostic.severity = none

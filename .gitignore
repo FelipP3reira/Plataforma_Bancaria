@@ -1,0 +1,25 @@
+# Build
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+artefatos/
+*.user
+*.suo
+.vs/
+
+# Segredos — nunca versionar. O modelo é o .env.example.
+.env
+.env.local
+appsettings.Development.json
+appsettings.Local.json
+
+# Cobertura e resultados de teste
+TestResults/
+coverage/
+*.trx
+*.coverage
+
+# Scripts locais de verificação, não fazem parte da entrega
+verificacao*
+bancada*
