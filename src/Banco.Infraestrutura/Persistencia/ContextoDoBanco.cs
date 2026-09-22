@@ -1,5 +1,6 @@
 using Banco.Dominio.Comum;
 using Banco.Dominio.Contas;
+using Banco.Dominio.Documentos;
 using Banco.Dominio.Ledger;
 using Banco.Dominio.Transferencias;
 using Microsoft.EntityFrameworkCore;
@@ -22,6 +23,8 @@ public sealed class ContextoDoBanco : DbContext
     public DbSet<Transferencia> Transferencias => Set<Transferencia>();
 
     public DbSet<MudancaDeEstadoDaConta> MudancasDeEstadoDaConta => Set<MudancaDeEstadoDaConta>();
+
+    public DbSet<Documento> Documentos => Set<Documento>();
 
     // Nome do parametro imposto pela assinatura da classe base.
     protected override void OnModelCreating(ModelBuilder modelBuilder)

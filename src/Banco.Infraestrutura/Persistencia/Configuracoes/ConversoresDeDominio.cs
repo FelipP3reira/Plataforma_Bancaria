@@ -1,5 +1,6 @@
 using Banco.Dominio.Comum;
 using Banco.Dominio.Contas;
+using Banco.Dominio.Documentos;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace Banco.Infraestrutura.Persistencia.Configuracoes;
@@ -18,6 +19,9 @@ internal static class ConversoresDeDominio
 {
     public static readonly ValueConverter<Dinheiro, decimal> Dinheiro =
         new(dinheiro => dinheiro.Valor, valor => Banco.Dominio.Comum.Dinheiro.De(valor));
+
+    public static readonly ValueConverter<HashDoArquivo, string> Hash =
+        new(hash => hash.Texto, texto => HashDoArquivo.DoTexto(texto));
 
     public static readonly ValueConverter<NumeroDaConta, string> NumeroDaConta =
         new(numero => numero.Texto, texto => Banco.Dominio.Contas.NumeroDaConta.Criar(texto));
