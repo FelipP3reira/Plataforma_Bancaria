@@ -4,6 +4,7 @@
     <Project Path="src/Banco.Aplicacao/Banco.Aplicacao.csproj" />
     <Project Path="src/Banco.Dominio/Banco.Dominio.csproj" />
     <Project Path="src/Banco.Infraestrutura/Banco.Infraestrutura.csproj" />
+    <Project Path="src/Banco.Worker/Banco.Worker.csproj" />
   </Folder>
   <Folder Name="/testes/">
     <Project Path="testes/Banco.Testes.Integracao/Banco.Testes.Integracao.csproj" />
