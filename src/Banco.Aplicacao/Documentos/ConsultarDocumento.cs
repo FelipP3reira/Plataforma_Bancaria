@@ -14,8 +14,17 @@ public sealed record DetalheDoDocumento(
     EstadoDoDocumento Estado,
     string Origem,
     DateTimeOffset RecebidoEm,
-    DateTimeOffset AtualizadoEm);
+    DateTimeOffset AtualizadoEm,
+    int Tentativas,
+    string? UltimoErro,
+    decimal? Confianca,
+    DateTimeOffset? ExtraidoEm,
+    string? ConteudoExtraido);
 
+/// <remarks>
+/// <c>LeaseAte</c> nao aparece na resposta: e mecanica interna da fila, e quem consulta o
+/// documento nao tem o que fazer com o prazo de reserva de um worker.
+/// </remarks>
 public sealed class ConsultarDocumento
 {
     private readonly IRepositorioDeDocumentos documentos;
@@ -37,6 +46,11 @@ public sealed class ConsultarDocumento
             documento.Estado,
             documento.Origem,
             documento.RecebidoEm,
-            documento.AtualizadoEm);
+            documento.AtualizadoEm,
+            documento.Tentativas,
+            documento.UltimoErro,
+            documento.Confianca,
+            documento.ExtraidoEm,
+            documento.ConteudoExtraido);
     }
 }

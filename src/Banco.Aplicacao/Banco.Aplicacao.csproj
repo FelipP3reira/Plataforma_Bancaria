@@ -1,7 +1,15 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
     <ProjectReference Include="..\Banco.Dominio\Banco.Dominio.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- So as abstracoes de log, e nenhuma implementacao: o pipeline precisa registrar o
+         que aconteceu com cada documento, e esse registro tem regra de sigilo propria que
+         so faz sentido escrever junto do codigo que decide o que nao pode sair. Quem
+         escolhe o destino do log continua sendo o host. -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
   </ItemGroup>
 
   <PropertyGroup>
