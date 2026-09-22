@@ -47,15 +47,4 @@ public readonly record struct HashDoArquivo
     }
 
     public override string ToString() => Texto;
-
-    /// <summary>
-    /// A chave que este documento apresenta ao movimentar a conta.
-    /// </summary>
-    /// <remarks>
-    /// Derivada do hash, e nao sorteada — mesmo raciocinio do desembolso no Core de
-    /// Credito. Se o pagamento for reenviado, a conta reconhece o lancamento que ja existe
-    /// em vez de debitar o boleto duas vezes.
-    /// </remarks>
-    public string ChaveDePagamento() =>
-        string.Create(CultureInfo.InvariantCulture, $"documento:{Texto}");
 }

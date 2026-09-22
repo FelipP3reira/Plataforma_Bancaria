@@ -13,6 +13,12 @@ public class FilaDoDocumentoTestes
     private static readonly DateTimeOffset Agora = new(2026, 9, 22, 10, 0, 0, TimeSpan.Zero);
     private static readonly TimeSpan Prazo = TimeSpan.FromMinutes(2);
 
+    /// <summary>
+    /// Limiar zero: nada cai na revisao. Os testes desta classe sao sobre a fila, e o
+    /// encaminhamento por confianca tem os seus.
+    /// </summary>
+    private const decimal TudoPassa = 0m;
+
     private static Documento Recebido() =>
         Documento.Receber(
             Guid.CreateVersion7(),
@@ -84,7 +90,7 @@ public class FilaDoDocumentoTestes
     public void ConcluirGuardaOTextoEAsDuasConfiancas()
     {
         var documento = Reservado();
-        documento.Concluir("linha digitavel", confiancaDoTexto: 0.93m, Leitura(0.40m), Agora);
+        documento.Concluir("linha digitavel", confiancaDoTexto: 0.93m, Leitura(0.40m), TudoPassa, Agora);
 
         Assert.Equal(EstadoDoDocumento.Extraido, documento.Estado);
         Assert.Equal("linha digitavel", documento.ConteudoExtraido);
@@ -97,7 +103,7 @@ public class FilaDoDocumentoTestes
     public void ConcluirGuardaOsCamposLidos()
     {
         var documento = Reservado();
-        documento.Concluir("texto", 1m, Leitura(1m, NomeDoCampo.Valor, NomeDoCampo.Vencimento), Agora);
+        documento.Concluir("texto", 1m, Leitura(1m, NomeDoCampo.Valor, NomeDoCampo.Vencimento), TudoPassa, Agora);
 
         Assert.Equal(
             [NomeDoCampo.Valor, NomeDoCampo.Vencimento],
@@ -112,7 +118,7 @@ public class FilaDoDocumentoTestes
     public void DocumentoExtraidoNaoVoltaParaAFila()
     {
         var documento = Reservado();
-        documento.Concluir("texto", 1m, Leitura(1m, NomeDoCampo.Valor), Agora);
+        documento.Concluir("texto", 1m, Leitura(1m, NomeDoCampo.Valor), TudoPassa, Agora);
 
         Assert.Throws<TransicaoInvalidaException>(() => documento.Falhar("de novo", Agora));
     }
@@ -130,14 +136,14 @@ public class FilaDoDocumentoTestes
     [InlineData(1.01)]
     public void ConfiancaDoTextoForaDaFaixaEhRecusada(double confianca) =>
         Assert.Throws<ArquivoRecusadoException>(
-            () => Reservado().Concluir("texto", (decimal)confianca, Leitura(1m), Agora));
+            () => Reservado().Concluir("texto", (decimal)confianca, Leitura(1m), TudoPassa, Agora));
 
     [Theory]
     [InlineData(-0.01)]
     [InlineData(1.01)]
     public void ConfiancaDaLeituraForaDaFaixaEhRecusada(double confianca) =>
         Assert.Throws<ArquivoRecusadoException>(
-            () => Reservado().Concluir("texto", 1m, Leitura((decimal)confianca), Agora));
+            () => Reservado().Concluir("texto", 1m, Leitura((decimal)confianca), TudoPassa, Agora));
 
     [Theory]
     [InlineData(0)]
@@ -219,7 +225,7 @@ public class FilaDoDocumentoTestes
     private static Documento ConcluidoCom(decimal confianca)
     {
         var documento = Reservado();
-        documento.Concluir("texto", confianca, Leitura(confianca), Agora);
+        documento.Concluir("texto", confianca, Leitura(confianca), TudoPassa, Agora);
 
         return documento;
     }

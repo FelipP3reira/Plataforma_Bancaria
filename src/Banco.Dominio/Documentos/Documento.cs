@@ -1,3 +1,4 @@
+using System.Globalization;
 using Banco.Dominio.Documentos.Boletos;
 using Banco.Dominio.Erros;
 
@@ -149,6 +150,16 @@ public sealed class Documento
 
     public DateTimeOffset? ExtraidoEm { get; private set; }
 
+    /// <summary>O lancamento que debitou a conta, quando o documento foi pago.</summary>
+    /// <remarks>
+    /// Guardado para que o documento aponte para o dinheiro que saiu por causa dele. Sem essa
+    /// ligacao, "este boleto foi pago?" e "qual debito e este no extrato?" seriam duas perguntas
+    /// sem resposta cruzada.
+    /// </remarks>
+    public Guid? LancamentoDoPagamentoId { get; private set; }
+
+    public DateTimeOffset? PagoEm { get; private set; }
+
     /// <summary>A reserva expirou: o worker que a pegou nao voltou.</summary>
     public bool LeaseVencidoEm(DateTimeOffset agora) =>
         Estado == EstadoDoDocumento.Extraindo && LeaseAte <= agora;
@@ -165,19 +176,41 @@ public sealed class Documento
         LeaseAte = agora + prazo;
     }
 
-    /// <summary>Grava o que foi lido do arquivo e os campos que a leitura produziu.</summary>
+    /// <summary>
+    /// Grava o que foi lido e encaminha: segue sozinho, ou para para alguem olhar.
+    /// </summary>
+    /// <param name="limiarDeConfianca">
+    /// Abaixo disto o documento vai para a revisao humana. Vem de fora porque e uma decisao de
+    /// operacao, nao de dominio — quem opera aperta a regua quando erra demais e afrouxa quando a
+    /// fila de revisao cresce mais do que da para atender.
+    /// </param>
+    /// <remarks>
+    /// O encaminhamento acontece <em>aqui</em>, no mesmo metodo que grava, e nao num passo
+    /// seguinte. Em dois passos existe um instante em que o documento esta extraido com confianca
+    /// baixa e ninguem marcou para revisao — e um processo que caisse nesse instante deixaria o
+    /// documento parecendo aprovado.
+    /// </remarks>
     public void Concluir(
         string conteudoExtraido,
         decimal confiancaDoTexto,
         LeituraDoDocumento leitura,
+        decimal limiarDeConfianca,
         DateTimeOffset agora)
     {
         ArgumentNullException.ThrowIfNull(leitura);
 
         Faixa(confiancaDoTexto, nameof(confiancaDoTexto));
         Faixa(leitura.Confianca, nameof(leitura));
+        Faixa(limiarDeConfianca, nameof(limiarDeConfianca));
 
-        Transicionar(EstadoDoDocumento.Extraido, agora);
+        // Menor que o limiar, e nao menor ou igual: com o limiar em 1,00, so o que se confere
+        // inteiro passa direto — e um documento perfeito nao deve cair na revisao por causa do
+        // sinal de comparacao.
+        Transicionar(
+            leitura.Confianca < limiarDeConfianca
+                ? EstadoDoDocumento.RequerRevisao
+                : EstadoDoDocumento.Extraido,
+            agora);
 
         ConteudoExtraido = conteudoExtraido;
         ConfiancaDoTexto = confiancaDoTexto;
@@ -220,6 +253,105 @@ public sealed class Documento
         LeaseAte = null;
         UltimoErro = Encurtar(motivo);
     }
+
+    /// <summary>
+    /// Registra a conferencia humana: aplica as correcoes e fecha a revisao.
+    /// </summary>
+    /// <remarks>
+    /// Aceita tambem documento que passou sozinho. A tela mostra o que foi extraido, e quem
+    /// confere pode discordar do modelo mesmo quando a confianca fechou alta — discordar tem que
+    /// ser possivel, senao a conferencia e enfeite.
+    /// </remarks>
+    public void Revisar(
+        IReadOnlyDictionary<NomeDoCampo, string> correcoes,
+        string revisor,
+        DateTimeOffset agora)
+    {
+        ArgumentNullException.ThrowIfNull(correcoes);
+
+        if (string.IsNullOrWhiteSpace(revisor))
+        {
+            throw new ArquivoRecusadoException("Revisor obrigatorio: correcao sem autor nao se audita.");
+        }
+
+        // Documento que passou sozinho entra na revisao primeiro, pela aresta que existe para
+        // isso. Pular direto para Revisado deixaria a trilha de estados sem dizer que houve
+        // conferencia.
+        if (Estado == EstadoDoDocumento.Extraido)
+        {
+            Transicionar(EstadoDoDocumento.RequerRevisao, agora);
+        }
+
+        foreach (var (nome, valor) in correcoes)
+        {
+            Campo(nome).Corrigir(valor, revisor.Trim(), agora);
+        }
+
+        Transicionar(EstadoDoDocumento.Revisado, agora);
+    }
+
+    /// <summary>
+    /// A chave de idempotencia do pagamento deste documento.
+    /// </summary>
+    /// <remarks>
+    /// Derivada do id, e nao sorteada: repetir um pagamento interrompido apresenta a mesma chave, e
+    /// a conta reconhece o debito que ja existe em vez de criar um segundo.
+    /// <para>
+    /// Sai do id e nao do hash do arquivo por um motivo de tamanho: <c>documento:</c> mais os 64
+    /// caracteres de um SHA-256 passa do teto de
+    /// <see cref="Ledger.PedidoDeLancamento.TamanhoMaximoDaChave"/>. E nao perde forca nenhuma,
+    /// porque o indice unico em (conta, hash) garante que o mesmo conteudo nunca vira dois
+    /// documentos na mesma conta — o id ja e uma funcao do conteudo, dentro da conta.
+    /// </para>
+    /// </remarks>
+    public string ChaveDePagamento() =>
+        string.Create(CultureInfo.InvariantCulture, $"documento:{Id:N}");
+
+    /// <summary>
+    /// Confere que este documento pode ser pago, sem pagar.
+    /// </summary>
+    /// <remarks>
+    /// Existe porque o debito e a marcacao nao sao a mesma operacao: a conta e debitada primeiro e o
+    /// documento e fechado depois. Sem esta conferencia antes do debito, um documento esperando
+    /// revisao era <em>cobrado</em> e so entao a transicao recusava — o dinheiro saia da conta e o
+    /// documento continuava na fila. Foi assim que este metodo nasceu, e o teste que o obrigou
+    /// confere o saldo depois da recusa e nao so o codigo de status.
+    /// <para>
+    /// Quem responde e a mesma maquina de estados que a transicao usa, e nao um <c>if</c> a parte:
+    /// duas listas do que pode ser pago divergiriam na primeira mudanca.
+    /// </para>
+    /// </remarks>
+    public void GarantirQuePodeSerPago() =>
+        MaquinaDeEstadosDoDocumento.Garantir(Estado, EstadoDoDocumento.Pago);
+
+    /// <summary>Fecha o documento contra o lancamento que debitou a conta.</summary>
+    /// <remarks>
+    /// Pago e terminal na maquina de estados, e este metodo e o unico caminho para la. O dinheiro
+    /// ja saiu e o extrato e a fonte da verdade do que aconteceu: reabrir o documento nao desfaria
+    /// o lancamento, so abriria caminho para pagar de novo.
+    /// </remarks>
+    public void Pagar(Guid lancamentoId, DateTimeOffset agora)
+    {
+        if (lancamentoId == Guid.Empty)
+        {
+            throw new ArquivoRecusadoException("Pagamento sem lancamento nao se audita.");
+        }
+
+        Transicionar(EstadoDoDocumento.Pago, agora);
+
+        LancamentoDoPagamentoId = lancamentoId;
+        PagoEm = agora;
+    }
+
+    /// <summary>O campo lido com este nome, ou erro se a leitura nao o produziu.</summary>
+    /// <remarks>
+    /// Corrigir um campo que nao existe nao e corrigir: e inventar. Se a maquina nao achou a linha
+    /// digitavel, aceitar uma digitada aqui criaria um campo sem nada dizendo de onde ele veio —
+    /// e o reprocessamento e o caminho certo para esse caso.
+    /// </remarks>
+    public CampoDoDocumento Campo(NomeDoCampo nome) =>
+        campos.Find(campo => campo.Nome == nome)
+        ?? throw new BoletoInvalidoException($"O documento nao tem campo {nome} para corrigir.");
 
     /// <summary>Devolve a fila um documento que desistiu. Decisao de gente.</summary>
     /// <remarks>

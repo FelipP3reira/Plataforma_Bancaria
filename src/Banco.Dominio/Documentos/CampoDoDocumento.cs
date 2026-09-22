@@ -1,4 +1,5 @@
 using Banco.Dominio.Documentos.Boletos;
+using Banco.Dominio.Erros;
 
 namespace Banco.Dominio.Documentos;
 
@@ -16,6 +17,7 @@ public sealed class CampoDoDocumento
 {
     public const int TamanhoMaximoDoValor = 60;
     public const int TamanhoMaximoDaObservacao = 200;
+    public const int TamanhoMaximoDoRevisor = 100;
 
     private CampoDoDocumento()
     {
@@ -60,6 +62,49 @@ public sealed class CampoDoDocumento
 
     /// <summary>Por que a confianca e o que e. Nunca carrega conteudo do documento.</summary>
     public string? Observacao { get; private set; }
+
+    /// <summary>
+    /// O que uma pessoa corrigiu, quando corrigiu. Nulo enquanto ninguem mexeu.
+    /// </summary>
+    /// <remarks>
+    /// Ao lado do valor lido, e nao no lugar dele. Sobrescrever apagaria o unico registro do que
+    /// a maquina errou — e e esse registro que responde depois em que campo a extracao erra mais,
+    /// que e a informacao que diz onde vale a pena melhorar o extrator.
+    /// </remarks>
+    public string? ValorCorrigido { get; private set; }
+
+    public string? CorrigidoPor { get; private set; }
+
+    public DateTimeOffset? CorrigidoEm { get; private set; }
+
+    /// <summary>O valor que vale: o corrigido quando existe, o lido quando nao.</summary>
+    /// <remarks>
+    /// Todo consumidor le por aqui. Quem lesse <see cref="ValorLido"/> direto pagaria o valor
+    /// errado justamente nos documentos que passaram pela revisao — os que mais precisavam de
+    /// cuidado.
+    /// </remarks>
+    public string ValorFinal => ValorCorrigido ?? ValorLido;
+
+    public bool FoiCorrigido => ValorCorrigido is not null;
+
+    /// <summary>Troca o valor deste campo, guardando o que a maquina tinha lido.</summary>
+    internal void Corrigir(string valor, string revisor, DateTimeOffset agora)
+    {
+        // A canonizacao recusa o que nao serve para este campo. A correcao e a unica porta por
+        // onde um valor entra sem ter passado pelo verificador da leitura automatica: linha
+        // digitavel corrigida para qualquer coisa fecharia o documento e o pagamento cobraria o
+        // que foi digitado.
+        var canonico = ValorDeCampo.Canonizar(Nome, valor);
+
+        if (canonico.Length > TamanhoMaximoDoValor)
+        {
+            throw new BoletoInvalidoException($"Valor de {Nome} longo demais.");
+        }
+
+        ValorCorrigido = canonico;
+        CorrigidoPor = revisor;
+        CorrigidoEm = agora;
+    }
 
     internal static CampoDoDocumento De(Guid documentoId, CampoLido lido) =>
         new(

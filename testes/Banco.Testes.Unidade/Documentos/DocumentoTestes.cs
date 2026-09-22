@@ -134,25 +134,6 @@ public class HashDoArquivoTestes
         Assert.All(hash, caractere => Assert.True(char.IsAsciiHexDigitLower(caractere)));
     }
 
-    /// <summary>
-    /// A chave de pagamento é derivada do hash, e não sorteada: boleto reenviado apresenta
-    /// a mesma chave e a conta reconhece o débito que já existe.
-    /// </summary>
-    [Fact]
-    public void AChaveDePagamentoNaoMuda()
-    {
-        var hash = HashDoArquivo.De(Bytes("boleto"));
-
-        Assert.Equal(hash.ChaveDePagamento(), hash.ChaveDePagamento());
-        Assert.Contains(hash.Texto, hash.ChaveDePagamento(), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void ArquivosDiferentesTemChavesDePagamentoDiferentes() =>
-        Assert.NotEqual(
-            HashDoArquivo.De(Bytes("boleto a")).ChaveDePagamento(),
-            HashDoArquivo.De(Bytes("boleto b")).ChaveDePagamento());
-
     [Theory]
     [InlineData("")]
     [InlineData("abc")]
