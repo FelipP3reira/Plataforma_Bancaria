@@ -13,7 +13,8 @@ public sealed class RepositorioDeDocumentos : IRepositorioDeDocumentos
     private const string Colunas = """
         [Id], [ContaId], [NomeOriginal], [Tipo], [TamanhoEmBytes], [Hash], [CaminhoRelativo],
         [Origem], [Estado], [RecebidoEm], [AtualizadoEm], [LeaseAte], [Tentativas],
-        [UltimoErro], [ConteudoExtraido], [Confianca], [ConfiancaDoTexto], [ExtraidoEm]
+        [UltimoErro], [ConteudoExtraido], [Confianca], [ConfiancaDoTexto], [ExtraidoEm],
+        [LancamentoDoPagamentoId], [PagoEm]
         """;
 
     /// <remarks>
@@ -68,6 +69,21 @@ public sealed class RepositorioDeDocumentos : IRepositorioDeDocumentos
         contexto.Documentos
             .FromSqlRaw(SqlDaFila, (int)EstadoDoDocumento.Recebido)
             .FirstOrDefaultAsync(cancelamento);
+
+    /// <remarks>
+    /// LINQ comum e nao SQL a mao: esta consulta nao reserva nada e nao precisa de dica de tabela.
+    /// O desempate pelo instante de chegada existe porque varios documentos empatam em confianca —
+    /// tres boletos com o valor divergente marcam 0,20 os tres.
+    /// </remarks>
+    public async Task<IReadOnlyList<Documento>> ParaRevisao(int quantidade, CancellationToken cancelamento) =>
+        await contexto.Documentos
+            .AsNoTracking()
+            .Where(documento => documento.Estado == EstadoDoDocumento.RequerRevisao)
+            .OrderBy(documento => documento.Confianca)
+            .ThenBy(documento => documento.RecebidoEm)
+            .Take(quantidade)
+            .ToListAsync(cancelamento)
+            .ConfigureAwait(false);
 
     public async Task<IReadOnlyList<Documento>> ComLeaseVencido(
         DateTimeOffset agora,

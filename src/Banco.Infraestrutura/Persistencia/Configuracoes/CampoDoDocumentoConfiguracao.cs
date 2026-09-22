@@ -27,6 +27,17 @@ internal sealed class CampoDoDocumentoConfiguracao : IEntityTypeConfiguration<Ca
 
         campo.Property(linha => linha.Confianca).HasPrecision(5, Dinheiro.CasasDecimais + 2);
 
+        campo.Property(linha => linha.ValorCorrigido)
+            .HasMaxLength(CampoDoDocumento.TamanhoMaximoDoValor);
+
+        campo.Property(linha => linha.CorrigidoPor)
+            .HasMaxLength(CampoDoDocumento.TamanhoMaximoDoRevisor);
+
+        // ValorFinal e FoiCorrigido saem de ValorCorrigido e nao viram coluna: coluna calculada
+        // que duplica outra e uma chance de as duas divergirem.
+        campo.Ignore(linha => linha.ValorFinal);
+        campo.Ignore(linha => linha.FoiCorrigido);
+
         // Um campo por nome, por documento. O indice unico e o que garante que a tela de
         // revisao nao encontre duas linhas de "Valor" dizendo coisas diferentes.
         campo.HasIndex(linha => new { linha.DocumentoId, linha.Nome })

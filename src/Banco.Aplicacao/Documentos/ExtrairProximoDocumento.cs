@@ -67,12 +67,12 @@ public sealed partial class ExtrairProximoDocumento
                 texto.Conteudo,
                 DateOnly.FromDateTime(agora.UtcDateTime));
 
-            documento.Concluir(texto.Conteudo, texto.Confianca, leitura, agora);
+            documento.Concluir(texto.Conteudo, texto.Confianca, leitura, opcoes.LimiarDeConfianca, agora);
 
             // Quantos campos, e nao quais: nome de campo e inofensivo, valor de campo nao. E nem
             // o tamanho do texto — o comprimento de um valor ja diz se o boleto e de tres ou de
             // seis digitos.
-            RegistrarExtracao(documento.Id, leitura.Confianca, leitura.Campos.Count);
+            RegistrarExtracao(documento.Id, leitura.Confianca, leitura.Campos.Count, documento.Estado);
         }
         catch (Exception erro) when (erro is not OperationCanceledException)
         {
@@ -159,8 +159,8 @@ public sealed partial class ExtrairProximoDocumento
 
     [LoggerMessage(
         Level = LogLevel.Information,
-        Message = "Documento {Documento} extraido com confianca {Confianca} e {Campos} campos")]
-    private partial void RegistrarExtracao(Guid documento, decimal confianca, int campos);
+        Message = "Documento {Documento} extraido com confianca {Confianca} e {Campos} campos; ficou em {Estado}")]
+    private partial void RegistrarExtracao(Guid documento, decimal confianca, int campos, EstadoDoDocumento estado);
 
     [LoggerMessage(
         Level = LogLevel.Warning,

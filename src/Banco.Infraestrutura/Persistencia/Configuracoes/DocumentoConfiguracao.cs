@@ -57,6 +57,13 @@ internal sealed class DocumentoConfiguracao : IEntityTypeConfiguration<Documento
         documento.Property(linha => linha.Confianca).HasPrecision(5, 4);
         documento.Property(linha => linha.ConfiancaDoTexto).HasPrecision(5, 4);
 
+        // Sem chave estrangeira para o lancamento de proposito. O ledger nao aponta de volta, e
+        // uma restricao daqui para la impediria arquivar lancamento antigo sem mexer em documento
+        // — que e uma amarra que nao paga o que custa. O indice existe para achar o documento a
+        // partir de um debito do extrato.
+        documento.HasIndex(linha => linha.LancamentoDoPagamentoId)
+            .HasDatabaseName("IX_Documentos_LancamentoDoPagamentoId");
+
         // A rede embaixo da conferencia de reenvio. Se dois uploads do mesmo arquivo
         // chegarem juntos, os dois passam pela consulta por hash e o banco recusa o
         // segundo — em vez de a conta ficar com duas extracoes do mesmo boleto.

@@ -25,4 +25,20 @@ public sealed class OpcoesDoPipeline
     /// <summary>Quantas reservas vencidas a varredura recupera por rodada.</summary>
     [Range(1, 500)]
     public int LotesDeRecuperacao { get; init; } = 20;
+
+    /// <summary>
+    /// Abaixo desta confianca o documento para para alguem olhar.
+    /// </summary>
+    /// <remarks>
+    /// Configuravel porque e uma regua de operacao, e nao uma regra do negocio: quem opera aperta
+    /// quando a extracao erra demais e afrouxa quando a fila de revisao cresce mais do que da para
+    /// atender. O padrao de 0,80 deixa passar o boleto cuja linha digitavel fecha e cujo CNPJ
+    /// ficou ambiguo, e barra tudo que dependa de valor achado no texto solto.
+    /// </remarks>
+    [Range(0.0, 1.0)]
+    public decimal LimiarDeConfianca { get; init; } = 0.80m;
+
+    /// <summary>Teto de documentos que a fila de revisao devolve por pagina.</summary>
+    [Range(1, 200)]
+    public int TamanhoMaximoDaRevisao { get; init; } = 50;
 }

@@ -27,6 +27,9 @@ internal static class ServicosDoBanco
         servicos.AddScoped<ReceberDocumento>();
         servicos.AddScoped<ConsultarDocumento>();
         servicos.AddScoped<ReenfileirarDocumento>();
+        servicos.AddScoped<ListarFilaDeRevisao>();
+        servicos.AddScoped<RevisarDocumento>();
+        servicos.AddScoped<PagarDocumento>();
         servicos.AddScoped<TransferirEntreContas>();
         servicos.AddScoped<ConsultarTransferencia>();
 

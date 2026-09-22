@@ -16,9 +16,16 @@ internal static class EndpointsDeDocumentos
             .DisableAntiforgery()
             .WithMetadata(new RequestSizeLimitAttribute(Documento.TamanhoMaximoEmBytes));
 
+        // Antes da rota com parametro: "/documentos/revisao" e "/documentos/{id}" competem, e a
+        // literal precisa ganhar. Como o parametro e restrito a guid, "revisao" nem casaria — a
+        // ordem esta aqui para que a rota continue funcionando se um dia a restricao sair.
+        documentos.MapGet("/revisao", Revisar);
+
         documentos.MapGet("/{id:guid}", Detalhar);
 
         documentos.MapPost("/{id:guid}/reprocessamento", Reprocessar);
+        documentos.MapPost("/{id:guid}/revisao", Conferir);
+        documentos.MapPost("/{id:guid}/pagamento", Pagar);
     }
 
     /// <summary>
@@ -37,12 +44,9 @@ internal static class EndpointsDeDocumentos
         ReceberDocumento receber,
         CancellationToken cancelamento)
     {
-        if (string.IsNullOrWhiteSpace(operador) || operador.Length > 100)
+        if (SemOperador(operador) is { } recusa)
         {
-            return Results.Problem(
-                title: $"Cabecalho {CabecalhoDeOperador} ausente ou longo demais",
-                detail: "Todo documento precisa registrar quem enviou.",
-                statusCode: StatusCodes.Status400BadRequest);
+            return recusa;
         }
 
         if (arquivo is null || arquivo.Length == 0)
@@ -68,7 +72,7 @@ internal static class EndpointsDeDocumentos
 
         var recebido = await receber
             .Executar(
-                new PedidoDeDocumento(contaId, arquivo.FileName, memoria.ToArray(), operador),
+                new PedidoDeDocumento(contaId, arquivo.FileName, memoria.ToArray(), operador!),
                 cancelamento)
             .ConfigureAwait(false);
 
@@ -95,6 +99,79 @@ internal static class EndpointsDeDocumentos
 
         return Results.Accepted($"/documentos/{id}");
     }
+
+    /// <summary>A fila de documentos esperando olho humano, os piores primeiro.</summary>
+    private static async Task<IResult> Revisar(
+        int? limite,
+        ListarFilaDeRevisao listar,
+        CancellationToken cancelamento) =>
+        Results.Ok(await listar.Executar(limite, cancelamento).ConfigureAwait(false));
+
+    /// <summary>
+    /// Registra a conferencia humana, com as correcoes que houver.
+    /// </summary>
+    /// <remarks>
+    /// O corpo pode vir sem correcao nenhuma: "olhei e esta certo" e um resultado, e o mais comum.
+    /// Exigir correcao para poder confirmar levaria quem revisa a inventar uma.
+    /// </remarks>
+    private static async Task<IResult> Conferir(
+        Guid id,
+        RevisaoHttp? corpo,
+        [FromHeader(Name = CabecalhoDeOperador)] string? operador,
+        RevisarDocumento revisar,
+        CancellationToken cancelamento)
+    {
+        if (SemOperador(operador) is { } recusa)
+        {
+            return recusa;
+        }
+
+        await revisar
+            .Executar(
+                id,
+                new PedidoDeRevisao(corpo?.Correcoes ?? new Dictionary<string, string>(), operador!),
+                cancelamento)
+            .ConfigureAwait(false);
+
+        return Results.NoContent();
+    }
+
+    /// <summary>
+    /// Debita a conta pelo boleto do documento.
+    /// </summary>
+    /// <remarks>
+    /// Sem <c>Idempotency-Key</c> no cabecalho, ao contrario das movimentacoes: a chave e derivada
+    /// do hash do arquivo. Pedir uma ao cliente aqui daria a ele a chance de mandar uma chave nova
+    /// para o mesmo boleto — que e exatamente o cobrar duas vezes que a chave existe para impedir.
+    /// <para>
+    /// 201 na primeira vez e 200 no repeteco, como o resto do sistema.
+    /// </para>
+    /// </remarks>
+    private static async Task<IResult> Pagar(
+        Guid id,
+        [FromHeader(Name = CabecalhoDeOperador)] string? operador,
+        PagarDocumento pagar,
+        CancellationToken cancelamento)
+    {
+        if (SemOperador(operador) is { } recusa)
+        {
+            return recusa;
+        }
+
+        var pagamento = await pagar.Executar(id, operador!, cancelamento).ConfigureAwait(false);
+
+        return pagamento.Novo
+            ? Results.Created($"/documentos/{id}", pagamento)
+            : Results.Ok(pagamento);
+    }
+
+    private static IResult? SemOperador(string? operador) =>
+        string.IsNullOrWhiteSpace(operador) || operador.Length > 100
+            ? Results.Problem(
+                title: $"Cabecalho {CabecalhoDeOperador} ausente ou longo demais",
+                detail: "Toda operacao sobre documento precisa registrar quem a fez.",
+                statusCode: StatusCodes.Status400BadRequest)
+            : null;
 
     private static async Task<IResult> Detalhar(
         Guid id,

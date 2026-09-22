@@ -5,12 +5,16 @@ using Banco.Dominio.Documentos;
 namespace Banco.Aplicacao.Documentos;
 
 /// <param name="Confianca">De 0 a 1. E ela que decide se o campo precisa de olho humano.</param>
+/// <param name="ValorFinal">O que vale: o corrigido quando existe, o lido quando nao.</param>
 public sealed record CampoDoDocumentoLido(
     string Nome,
     string ValorLido,
+    string ValorFinal,
     decimal Confianca,
     string Origem,
-    string? Observacao);
+    string? Observacao,
+    string? CorrigidoPor,
+    DateTimeOffset? CorrigidoEm);
 
 public sealed record DetalheDoDocumento(
     Guid Id,
@@ -29,6 +33,8 @@ public sealed record DetalheDoDocumento(
     decimal? ConfiancaDoTexto,
     DateTimeOffset? ExtraidoEm,
     string? ConteudoExtraido,
+    Guid? LancamentoDoPagamentoId,
+    DateTimeOffset? PagoEm,
     IReadOnlyList<CampoDoDocumentoLido> Campos);
 
 /// <remarks>
@@ -63,13 +69,18 @@ public sealed class ConsultarDocumento
             documento.ConfiancaDoTexto,
             documento.ExtraidoEm,
             documento.ConteudoExtraido,
+            documento.LancamentoDoPagamentoId,
+            documento.PagoEm,
             [.. documento.Campos
                 .OrderBy(campo => campo.Nome)
                 .Select(campo => new CampoDoDocumentoLido(
                     campo.Nome.ToString(),
                     campo.ValorLido,
+                    campo.ValorFinal,
                     campo.Confianca,
                     campo.Origem.ToString(),
-                    campo.Observacao))]);
+                    campo.Observacao,
+                    campo.CorrigidoPor,
+                    campo.CorrigidoEm))]);
     }
 }

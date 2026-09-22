@@ -28,6 +28,16 @@ public interface IRepositorioDeDocumentos
     Task<Documento?> ProximoDaFila(CancellationToken cancelamento);
 
     /// <summary>
+    /// Os documentos esperando olho humano, os menos confiaveis primeiro.
+    /// </summary>
+    /// <remarks>
+    /// Ordenado pela confianca e nao pela chegada: a fila de revisao nao e por ordem de entrada, e
+    /// por gravidade. O documento cujo valor impresso nao bate com o codigo de barras precisa ser
+    /// visto antes do que so tem o CNPJ ambiguo.
+    /// </remarks>
+    Task<IReadOnlyList<Documento>> ParaRevisao(int quantidade, CancellationToken cancelamento);
+
+    /// <summary>
     /// Os documentos cuja reserva venceu: o worker que os pegou nao voltou.
     /// </summary>
     Task<IReadOnlyList<Documento>> ComLeaseVencido(
