@@ -1,3 +1,4 @@
+using Banco.Dominio.Documentos.Boletos;
 using Banco.Dominio.Erros;
 
 namespace Banco.Dominio.Documentos;
@@ -26,6 +27,8 @@ public sealed class Documento
     public const int MaximoDeTentativas = 3;
 
     public const int TamanhoMaximoDoErro = 300;
+
+    private readonly List<CampoDoDocumento> campos = [];
 
     private Documento()
     {
@@ -119,8 +122,30 @@ public sealed class Documento
     /// <summary>O texto que o extrator leu do arquivo. Dado sensivel.</summary>
     public string? ConteudoExtraido { get; private set; }
 
-    /// <summary>Quanto o extrator confia no que leu, de 0 a 1.</summary>
+    /// <summary>
+    /// A confianca do documento, de 0 a 1: a menor entre os campos necessarios para pagar.
+    /// </summary>
+    /// <remarks>
+    /// E este numero que decide se o documento segue ou vai para a revisao humana, e ele vem da
+    /// <em>estrutura</em> lida, nao da opiniao do extrator sobre a propria leitura. Um modelo de
+    /// visao devolve confianca alta tendo lido um algarismo errado, porque ele nao tem como
+    /// saber; os quatro digitos verificadores da linha digitavel tem.
+    /// </remarks>
     public decimal? Confianca { get; private set; }
+
+    /// <summary>
+    /// Quanto o extrator diz ter conseguido ler do arquivo, de 0 a 1.
+    /// </summary>
+    /// <remarks>
+    /// Guardada ao lado da outra, e nao no lugar dela, porque as duas respondem perguntas
+    /// diferentes na hora da revisao: esta diz se o problema foi <em>ler o arquivo</em>, a outra
+    /// diz se o que foi lido <em>e um boleto</em>. Sem separar, um PDF ilegivel e um cartaz
+    /// perfeitamente legivel chegariam na fila com a mesma cara.
+    /// </remarks>
+    public decimal? ConfiancaDoTexto { get; private set; }
+
+    /// <summary>Os campos que a leitura produziu.</summary>
+    public IReadOnlyList<CampoDoDocumento> Campos => campos;
 
     public DateTimeOffset? ExtraidoEm { get; private set; }
 
@@ -140,20 +165,41 @@ public sealed class Documento
         LeaseAte = agora + prazo;
     }
 
-    public void Concluir(string conteudoExtraido, decimal confianca, DateTimeOffset agora)
+    /// <summary>Grava o que foi lido do arquivo e os campos que a leitura produziu.</summary>
+    public void Concluir(
+        string conteudoExtraido,
+        decimal confiancaDoTexto,
+        LeituraDoDocumento leitura,
+        DateTimeOffset agora)
     {
-        if (confianca is < 0m or > 1m)
-        {
-            throw new ArquivoRecusadoException($"Confianca fora da faixa de 0 a 1: {confianca}.");
-        }
+        ArgumentNullException.ThrowIfNull(leitura);
+
+        Faixa(confiancaDoTexto, nameof(confiancaDoTexto));
+        Faixa(leitura.Confianca, nameof(leitura));
 
         Transicionar(EstadoDoDocumento.Extraido, agora);
 
         ConteudoExtraido = conteudoExtraido;
-        Confianca = confianca;
+        ConfiancaDoTexto = confiancaDoTexto;
+        Confianca = leitura.Confianca;
         ExtraidoEm = agora;
         LeaseAte = null;
         UltimoErro = null;
+
+        // Sem limpar antes: a maquina de estados nao tem aresta de Extraido de volta para a
+        // fila, entao este metodo roda no maximo uma vez por documento. Se um dia existir
+        // reextracao, e aqui que a leitura antiga tem que sair — guardar as duas deixaria a
+        // tela de revisao sem saber qual vale.
+        campos.AddRange(leitura.Campos.Select(lido => CampoDoDocumento.De(Id, lido)));
+    }
+
+    private static void Faixa(decimal confianca, string campo)
+    {
+        if (confianca is < 0m or > 1m)
+        {
+            throw new ArquivoRecusadoException(
+                $"Confianca de {campo} fora da faixa de 0 a 1: {confianca}.");
+        }
     }
 
     /// <summary>

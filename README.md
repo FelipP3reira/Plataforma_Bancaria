@@ -11,8 +11,8 @@ Completo: conta, ledger, movimentação, transferência atômica, bloqueio, ence
 extrato paginado e o Core de Crédito usando a conta como produto.
 
 Em andamento: a **extração de documentos financeiros** — upload seguro, fila de
-processamento e o worker que consome. Os campos do boleto e a fila de revisão manual são os
-próximos passos.
+processamento, o worker que consome e os campos do boleto conferidos por dígito verificador. A
+fila de revisão manual é o próximo passo.
 
 ```
 POST /contas                        abre conta (nasce zerada e ativa)
@@ -30,7 +30,7 @@ GET  /contas/{id}/estados           a trilha de mudanças de estado
 GET  /transferencias/{id}           uma transferência pelo id
 
 POST /documentos                    envia boleto, nota ou comprovante (multipart)
-GET  /documentos/{id}               estado da extração, confiança e o que foi lido
+GET  /documentos/{id}               estado, confiança, campos extraídos e o que foi lido
 POST /documentos/{id}/reprocessamento  devolve à fila um documento que desistiu
 ```
 
@@ -597,6 +597,117 @@ A confiança que ele devolve é a proporção do arquivo que saiu como texto leg
 honesta do que ele conseguiu ler — e é ela que vai fazer PDF comprimido cair na revisão
 manual em vez de passar como extraído.
 
+### A estrutura confere o modelo, e não o contrário
+
+Este é o ponto da feature, e vale explicitar porque é contraintuitivo.
+
+Um modelo de visão devolve a própria confiança junto com a leitura. Essa confiança é uma
+**opinião**: ele diz 0,97 tendo lido `8` onde estava `3`, porque não tem como saber que errou.
+Aceitar esse número como régua de "precisa de olho humano?" é delegar a decisão a quem não tem
+a informação.
+
+A linha digitável de um boleto tem **quatro dígitos verificadores** — um por campo, em módulo
+10, e um geral sobre o código de barras, em módulo 11. Se os quatro fecham em 47 algarismos, a
+leitura errada teria que ter acertado quatro contas por acaso. Então:
+
+- campo que sai de estrutura conferida vale **1,00**, e a opinião do modelo sobre si mesmo não
+  entra na conta;
+- campo achado por formato no texto solto vale **0,50**, porque ninguém confirma que o número
+  achado é o campo procurado: `R$ 45,00` pode ser o valor do boleto ou a multa impressa ao lado.
+
+Por isso o documento guarda **duas** confianças, e não uma. `Confianca` é a da estrutura e é ela
+que decide o encaminhamento; `ConfiancaDoTexto` é a do extrator. As duas respondem perguntas
+diferentes na hora de revisar: uma diz se o problema foi *ler o arquivo*, a outra diz se o que
+foi lido *é um boleto*. Com um número só, um PDF ilegível e um cartaz perfeitamente legível
+chegariam na fila com a mesma cara.
+
+### A linha digitável é uma reordenação do código de barras
+
+Os campos não estão onde a intuição coloca. O valor mora nas posições 38 a 47 da linha
+digitável e nas posições 10 a 19 do código de barras, porque a linha digitável embaralha o
+código para que os campos livres fiquem em blocos de tamanho digitável, com os dígitos de
+conferência intercalados.
+
+Remontar o código de barras é o que permite conferir o dígito geral, que só existe lá. O teste
+compara a remontagem com o código de barras publicado pela FEBRABAN para o exemplo dela.
+
+A varredura procura **janelas de 47 algarismos**, e não um padrão pontuado: o texto vem de
+leitura de imagem, e o ponto que o banco imprime pode não ter sobrevivido. Exigir a pontuação
+recusaria a maioria das leituras boas. O que sustenta a varredura é o verificador — janela
+errada não fecha.
+
+O CNPJ **não** aceita esse tratamento. Ele tem dois dígitos de conferência, não quatro, e uma
+janela em cento e vinte fecha por acaso: numa página de nota fiscal isso produz vários CNPJ
+inventados. Por isso ele só é aceito pontuado ou como token isolado de catorze caracteres.
+
+### O fator de vencimento acabou em 2025
+
+O vencimento vem gravado como uma contagem de dias em quatro algarismos. Quatro algarismos dão
+9000 datas contando de 1000, e o padrão nasceu em 1997 sem pensar no que aconteceria quando
+acabassem. Acabaram: o fator 9999 caiu em **21/02/2025**, e a FEBRABAN determinou que no dia
+seguinte o contador voltasse a 1000.
+
+Isso significa que **o mesmo fator descreve duas datas**. Fator 1000 é 03/07/2000 no ciclo
+antigo e 22/02/2025 no novo. Ler sem desambiguar devolveria vencimento de vinte e cinco anos
+atrás para um boleto emitido este mês — e boleto vencido não é boleto pagável: a diferença
+decide se o sistema cobra multa, recusa o pagamento ou paga na data.
+
+A desambiguação usa a única pista que existe: qual das duas leituras é crível para quem está
+lendo **agora**. Não há resposta independente da data de leitura, e o teste afirma isso — o
+mesmo fator 6000 resolve para 2014 se lido em 2015 e para 2038 se lido em 2036.
+
+Quando nenhuma das duas é crível, o fator sai marcado como ambíguo e a confiança cai para 0,40.
+O acerto silencioso é o que produz boleto pago na data errada.
+
+### A confiança do documento é a menor, nunca a média
+
+Média deixa um campo ilegível passar escondido atrás de três campos perfeitos — e o ilegível
+pode ser justamente o valor. Com a média, um boleto cuja linha e vencimento valem 1,00 e cujo
+valor divergiu (0,20) fecharia em 0,73 e passaria por qualquer limiar razoável. Com o mínimo,
+fecha em 0,20 e vai para a mão de alguém.
+
+O CNPJ fica **fora** dessa conta. Ele importa para o registro e para conferir a quem se está
+pagando, mas não é ele que o banco usa para cobrar: exigi-lo mandaria para a revisão todo
+boleto legível cujo emissor não imprimiu o CNPJ em posição reconhecível.
+
+### O valor impresso é conferido contra o código de barras
+
+Boleto adulterado tem uma assinatura específica: o valor impresso na folha não é o do código de
+barras. A vítima lê o valor certo e o banco cobra o do código.
+
+Quando o texto tem valores e **nenhum** deles é o da estrutura, a confiança do valor cai para
+0,20 — abaixo de qualquer limiar razoável. O valor gravado continua sendo o do código de
+barras, que é o que o banco cobraria.
+
+A regra é "nenhum bate", e não "algum difere": todo boleto imprime multa, juros e desconto ao
+lado do total, e a regra mais estrita acusaria praticamente todos.
+
+### Conta de concessionária é recusada dizendo o que é
+
+Conta de luz, água e tributo tem 48 algarismos e outro padrão inteiro — outra posição de valor,
+outro verificador, e o vencimento nem sempre está lá. Um leitor que aceitasse os dois e errasse
+a escolha pagaria o valor lido da posição errada. Recusar dizendo o que é vale mais do que
+adivinhar.
+
+### Os campos ficam numa tabela filha
+
+Três motivos concretos: o conjunto de campos cresce, e coluna nova por campo faria a tabela
+principal crescer junto; a confiança é por campo, e um par de colunas por campo dobraria a
+largura; e a correção humana precisa morar **ao lado** do valor lido, não no lugar dele — o que
+exige uma linha com as duas coisas. `ValorLido` nunca muda: sem isso não há como medir depois em
+que campos a extração erra, que é a informação que diz onde vale a pena melhorar.
+
+### O CNPJ alfanumérico
+
+Os doze primeiros caracteres podem ser letra desde 2026; os dois últimos continuam sendo
+algarismo, porque são resultado de um módulo 11. A conta é a mesma, com cada caractere valendo o
+código ASCII menos 48 — o que faz `'0'` valer 0 e `'A'` valer 17, mantendo os CNPJ antigos com o
+mesmo dígito que sempre tiveram. O teste usa o exemplo que a Receita publicou,
+`12.ABC.345/01DE-35`.
+
+Sequência repetida é recusada de propósito: ela passa na conta dos verificadores e não existe na
+Receita — e é exatamente o que um modelo devolve quando lê um campo em branco.
+
 ## Idempotência
 
 Toda operação financeira exige `Idempotency-Key`. A chave fica gravada na linha do ledger, e
@@ -703,7 +814,10 @@ mostra na tela. No domínio é impedir que o lançamento exista, venha de onde v
 - Os bytes do documento ficam fora do webroot, com o caminho derivado do hash: nada do que
   quem enviou escolheu entra no caminho de gravação.
 - O conteúdo extraído nunca vai para log, e a coluna de erro grava o tipo da exceção, não a
-  mensagem dela.
+  mensagem dela. A observação que explica a confiança de um campo também não carrega o valor
+  dele — é o tipo de texto que acaba em tela de suporte. Há teste afirmando as duas coisas.
+- Valor impresso que não bate com o código de barras derruba a confiança a 0,20 em vez de
+  escolher um dos dois: é a assinatura do boleto adulterado, e não se resolve com heurística.
 - Segredos em `.env`, fora do git, com `.env.example` versionado.
 - HSTS e redirecionamento de HTTPS fora de desenvolvimento; `nosniff`, `no-referrer` e
   `DENY` de enquadramento em toda resposta.
@@ -723,16 +837,19 @@ mostra na tela. No domínio é impedir que o lançamento exista, venha de onde v
 - **Reconciliação em lote.** Hoje a conferência é conta a conta, sob demanda. Uma varredura
   periódica de toda a base é outro problema — precisa de janela, de paginação e de um lugar
   para reportar.
-- **Os campos do boleto.** Hoje a extração devolve o texto e uma confiança; ainda não há
-  linha digitável conferida por dígito verificador, valor, vencimento nem CNPJ do emissor.
 - **A fila de revisão manual.** O estado `RequerRevisao` existe na máquina e ninguém entra
-  nele: falta o limiar de confiança configurável e a rota de correção humana.
+  nele: falta o limiar de confiança configurável e a rota de correção humana. É onde os
+  documentos de confiança baixa vão parar, e hoje eles ficam em `Extraido` sem ninguém olhar.
+- **O pagamento do boleto.** Os campos já saem prontos para cobrar, mas nada liga o documento
+  confirmado a um saque na conta.
+- **Conta de concessionária** (48 algarismos). Recusada explicitamente hoje, com mensagem
+  dizendo o que é — o padrão é outro e merece o próprio leitor.
 - **A rota que baixa o documento.** Os bytes estão fora do webroot justamente para que o
   único caminho de leitura seja uma rota, e é onde a autorização vai morar.
 - **Limite por IP nas rotas de movimentação.**
 - **Filtro do extrato por tipo, valor ou origem.** Hoje o recorte é só por período.
 - **Extrato em arquivo** (CSV, PDF). Hoje sai só como JSON, pela rota.
-- **Testes da interface.** O back-end tem 256; a web não tem nenhum. O fluxo foi conferido
+- **Testes da interface.** O back-end tem 338; a web não tem nenhum. O fluxo foi conferido
   ponta a ponta com as duas APIs no ar, mas isso é conferência manual, não suíte.
 - **Responsividade em telas pequenas.** A tabela do extrato rola na horizontal e resolve,
   mas não é um layout pensado para celular.

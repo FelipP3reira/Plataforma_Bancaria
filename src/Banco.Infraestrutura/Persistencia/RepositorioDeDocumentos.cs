@@ -13,7 +13,7 @@ public sealed class RepositorioDeDocumentos : IRepositorioDeDocumentos
     private const string Colunas = """
         [Id], [ContaId], [NomeOriginal], [Tipo], [TamanhoEmBytes], [Hash], [CaminhoRelativo],
         [Origem], [Estado], [RecebidoEm], [AtualizadoEm], [LeaseAte], [Tentativas],
-        [UltimoErro], [ConteudoExtraido], [Confianca], [ExtraidoEm]
+        [UltimoErro], [ConteudoExtraido], [Confianca], [ConfiancaDoTexto], [ExtraidoEm]
         """;
 
     /// <remarks>

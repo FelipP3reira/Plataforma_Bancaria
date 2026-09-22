@@ -55,6 +55,7 @@ internal sealed class DocumentoConfiguracao : IEntityTypeConfiguration<Documento
         // assume decimal(18,2), e toda confianca viraria 0,00 / 0,50 / 1,00 — o limiar de
         // revisao manual passaria a comparar contra um valor arredondado.
         documento.Property(linha => linha.Confianca).HasPrecision(5, 4);
+        documento.Property(linha => linha.ConfiancaDoTexto).HasPrecision(5, 4);
 
         // A rede embaixo da conferencia de reenvio. Se dois uploads do mesmo arquivo
         // chegarem juntos, os dois passam pela consulta por hash e o banco recusa o
@@ -72,6 +73,20 @@ internal sealed class DocumentoConfiguracao : IEntityTypeConfiguration<Documento
         // cada poucos segundos.
         documento.HasIndex(linha => new { linha.Estado, linha.LeaseAte })
             .HasDatabaseName("IX_Documentos_Estado_LeaseAte");
+
+        // Os campos entram e saem junto com o documento: nao existe campo extraido de documento
+        // nenhum, e reprocessar substitui a leitura inteira. Cascata aqui e o oposto do
+        // Restrict do ledger, porque nao ha nada a auditar num campo sem documento.
+        documento.HasMany(linha => linha.Campos)
+            .WithOne()
+            .HasForeignKey(campo => campo.DocumentoId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Carregado sempre, e nao sob demanda. Nao existe consulta de documento que nao queira
+        // os campos: a tela de detalhe mostra, a fila de revisao decide por eles e o pagamento
+        // le o valor de la. Um documento tem poucos campos, entao o custo de trazer sempre e
+        // menor do que o de descobrir um Include esquecido em producao.
+        documento.Navigation(linha => linha.Campos).AutoInclude();
 
         documento.HasOne<Conta>()
             .WithMany()

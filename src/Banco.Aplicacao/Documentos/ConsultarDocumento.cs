@@ -4,6 +4,14 @@ using Banco.Dominio.Documentos;
 
 namespace Banco.Aplicacao.Documentos;
 
+/// <param name="Confianca">De 0 a 1. E ela que decide se o campo precisa de olho humano.</param>
+public sealed record CampoDoDocumentoLido(
+    string Nome,
+    string ValorLido,
+    decimal Confianca,
+    string Origem,
+    string? Observacao);
+
 public sealed record DetalheDoDocumento(
     Guid Id,
     Guid ContaId,
@@ -18,8 +26,10 @@ public sealed record DetalheDoDocumento(
     int Tentativas,
     string? UltimoErro,
     decimal? Confianca,
+    decimal? ConfiancaDoTexto,
     DateTimeOffset? ExtraidoEm,
-    string? ConteudoExtraido);
+    string? ConteudoExtraido,
+    IReadOnlyList<CampoDoDocumentoLido> Campos);
 
 /// <remarks>
 /// <c>LeaseAte</c> nao aparece na resposta: e mecanica interna da fila, e quem consulta o
@@ -50,7 +60,16 @@ public sealed class ConsultarDocumento
             documento.Tentativas,
             documento.UltimoErro,
             documento.Confianca,
+            documento.ConfiancaDoTexto,
             documento.ExtraidoEm,
-            documento.ConteudoExtraido);
+            documento.ConteudoExtraido,
+            [.. documento.Campos
+                .OrderBy(campo => campo.Nome)
+                .Select(campo => new CampoDoDocumentoLido(
+                    campo.Nome.ToString(),
+                    campo.ValorLido,
+                    campo.Confianca,
+                    campo.Origem.ToString(),
+                    campo.Observacao))]);
     }
 }

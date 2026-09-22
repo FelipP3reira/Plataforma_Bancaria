@@ -1,5 +1,6 @@
 using System.Text;
 using Banco.Dominio.Documentos;
+using Banco.Dominio.Documentos.Boletos;
 using Banco.Dominio.Erros;
 
 namespace Banco.Testes.Unidade.Documentos;
@@ -75,16 +76,45 @@ public class FilaDoDocumentoTestes
     public void DocumentoNaFilaNaoTemPrazoVencido() =>
         Assert.False(Recebido().LeaseVencidoEm(Agora.AddYears(1)));
 
+    /// <summary>
+    /// As duas confiancas ficam guardadas separadas: a do extrator sobre a propria leitura, e a
+    /// da estrutura sobre o que foi lido. E a da estrutura que vale como confianca do documento.
+    /// </summary>
     [Fact]
-    public void ConcluirGuardaOTextoEAConfianca()
+    public void ConcluirGuardaOTextoEAsDuasConfiancas()
     {
         var documento = Reservado();
-        documento.Concluir("linha digitavel", 0.93m, Agora);
+        documento.Concluir("linha digitavel", confiancaDoTexto: 0.93m, Leitura(0.40m), Agora);
 
         Assert.Equal(EstadoDoDocumento.Extraido, documento.Estado);
         Assert.Equal("linha digitavel", documento.ConteudoExtraido);
-        Assert.Equal(0.93m, documento.Confianca);
+        Assert.Equal(0.93m, documento.ConfiancaDoTexto);
+        Assert.Equal(0.40m, documento.Confianca);
         Assert.Equal(Agora, documento.ExtraidoEm);
+    }
+
+    [Fact]
+    public void ConcluirGuardaOsCamposLidos()
+    {
+        var documento = Reservado();
+        documento.Concluir("texto", 1m, Leitura(1m, NomeDoCampo.Valor, NomeDoCampo.Vencimento), Agora);
+
+        Assert.Equal(
+            [NomeDoCampo.Valor, NomeDoCampo.Vencimento],
+            documento.Campos.Select(campo => campo.Nome));
+    }
+
+    /// <summary>
+    /// Documento extraido nao volta para a fila: nao ha aresta de Extraido para Recebido. E o
+    /// que garante que a leitura de um documento nunca e sobrescrita pela metade.
+    /// </summary>
+    [Fact]
+    public void DocumentoExtraidoNaoVoltaParaAFila()
+    {
+        var documento = Reservado();
+        documento.Concluir("texto", 1m, Leitura(1m, NomeDoCampo.Valor), Agora);
+
+        Assert.Throws<TransicaoInvalidaException>(() => documento.Falhar("de novo", Agora));
     }
 
     /// <summary>
@@ -98,9 +128,16 @@ public class FilaDoDocumentoTestes
     [Theory]
     [InlineData(-0.01)]
     [InlineData(1.01)]
-    public void ConfiancaForaDaFaixaEhRecusada(double confianca) =>
+    public void ConfiancaDoTextoForaDaFaixaEhRecusada(double confianca) =>
         Assert.Throws<ArquivoRecusadoException>(
-            () => Reservado().Concluir("texto", (decimal)confianca, Agora));
+            () => Reservado().Concluir("texto", (decimal)confianca, Leitura(1m), Agora));
+
+    [Theory]
+    [InlineData(-0.01)]
+    [InlineData(1.01)]
+    public void ConfiancaDaLeituraForaDaFaixaEhRecusada(double confianca) =>
+        Assert.Throws<ArquivoRecusadoException>(
+            () => Reservado().Concluir("texto", 1m, Leitura((decimal)confianca), Agora));
 
     [Theory]
     [InlineData(0)]
@@ -174,10 +211,15 @@ public class FilaDoDocumentoTestes
     public void DocumentoQueEstaExtraindoNaoVoltaParaAFilaAMao() =>
         Assert.Throws<TransicaoInvalidaException>(() => Reservado().Reenfileirar(Agora));
 
+    private static LeituraDoDocumento Leitura(decimal confianca, params NomeDoCampo[] nomes) =>
+        new(
+            [.. nomes.Select(nome => new CampoLido(nome, "1", confianca, OrigemDoCampo.Estrutura))],
+            confianca);
+
     private static Documento ConcluidoCom(decimal confianca)
     {
         var documento = Reservado();
-        documento.Concluir("texto", confianca, Agora);
+        documento.Concluir("texto", confianca, Leitura(confianca), Agora);
 
         return documento;
     }

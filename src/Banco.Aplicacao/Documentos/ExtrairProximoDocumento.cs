@@ -1,5 +1,6 @@
 using Banco.Aplicacao.Portas;
 using Banco.Dominio.Documentos;
+using Banco.Dominio.Documentos.Boletos;
 using Microsoft.Extensions.Logging;
 
 namespace Banco.Aplicacao.Documentos;
@@ -57,11 +58,21 @@ public sealed partial class ExtrairProximoDocumento
         {
             var texto = await Ler(documento, cancelamento).ConfigureAwait(false);
 
-            documento.Concluir(texto.Conteudo, texto.Confianca, relogio.GetUtcNow());
+            var agora = relogio.GetUtcNow();
 
-            // Nem o texto nem o tamanho dele: o comprimento de um campo extraido ja diz se
-            // o boleto tem valor de tres ou de seis digitos.
-            RegistrarExtracao(documento.Id, texto.Confianca);
+            // A interpretacao roda aqui, e nao dentro do extrator: o extrator tem uma so
+            // responsabilidade, que e transformar bytes em texto, e trocar de provedor nao pode
+            // trocar as regras do boleto brasileiro junto.
+            var leitura = InterpretadorDeBoleto.Interpretar(
+                texto.Conteudo,
+                DateOnly.FromDateTime(agora.UtcDateTime));
+
+            documento.Concluir(texto.Conteudo, texto.Confianca, leitura, agora);
+
+            // Quantos campos, e nao quais: nome de campo e inofensivo, valor de campo nao. E nem
+            // o tamanho do texto — o comprimento de um valor ja diz se o boleto e de tres ou de
+            // seis digitos.
+            RegistrarExtracao(documento.Id, leitura.Confianca, leitura.Campos.Count);
         }
         catch (Exception erro) when (erro is not OperationCanceledException)
         {
@@ -148,8 +159,8 @@ public sealed partial class ExtrairProximoDocumento
 
     [LoggerMessage(
         Level = LogLevel.Information,
-        Message = "Documento {Documento} extraido com confianca {Confianca}")]
-    private partial void RegistrarExtracao(Guid documento, decimal confianca);
+        Message = "Documento {Documento} extraido com confianca {Confianca} e {Campos} campos")]
+    private partial void RegistrarExtracao(Guid documento, decimal confianca, int campos);
 
     [LoggerMessage(
         Level = LogLevel.Warning,

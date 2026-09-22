@@ -8,14 +8,27 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Banco.Testes.Integracao;
 
+internal sealed record CampoHttp(
+    string Nome,
+    string ValorLido,
+    decimal Confianca,
+    string Origem,
+    string? Observacao);
+
 internal sealed record DetalheHttp(
     Guid Id,
     string Estado,
     int Tentativas,
     string? UltimoErro,
     decimal? Confianca,
+    decimal? ConfiancaDoTexto,
     DateTimeOffset? ExtraidoEm,
-    string? ConteudoExtraido);
+    string? ConteudoExtraido,
+    IReadOnlyList<CampoHttp> Campos)
+{
+    public CampoHttp? Campo(string nome) =>
+        Campos.FirstOrDefault(campo => campo.Nome == nome);
+}
 
 /// <summary>
 /// A fila de extracao contra o banco de verdade: a trava que evita dois workers no mesmo
@@ -70,6 +83,9 @@ public class FilaDeExtracaoTestes : IAsyncLifetime
 
         return Task.CompletedTask;
     }
+
+    /// <summary>Boleto de R$ 189,90 com vencimento em 10/10/2026.</summary>
+    private const string LinhaDoBoleto = "00191234546789012345767890123457915950000018990";
 
     private static byte[] PdfDe(string miolo) =>
         [.. "%PDF-1.7\n"u8, .. System.Text.Encoding.ASCII.GetBytes(miolo)];
@@ -320,6 +336,82 @@ public class FilaDeExtracaoTestes : IAsyncLifetime
             HttpStatusCode.NotFound,
             (await fabrica.CreateClient()
                 .PostAsync($"/documentos/{Guid.NewGuid()}/reprocessamento", content: null)).StatusCode);
+
+    /// <summary>
+    /// O caminho inteiro: arquivo com boleto entra e sai como campos pagaveis.
+    /// </summary>
+    [Fact]
+    public async Task OBoletoNoArquivoViraCamposComConfiancaCheia()
+    {
+        var cliente = fabrica.CreateClient();
+        var conta = await cliente.ContaCom(0m);
+        var id = await Enviar(cliente, conta, $"Energia SA\n{LinhaDoBoleto}\nPagavel em qualquer banco");
+
+        Assert.True(await UmaRodada());
+
+        var detalhe = await Detalhe(cliente, id);
+
+        Assert.Equal("Extraido", detalhe!.Estado);
+        Assert.Equal(1.00m, detalhe.Confianca);
+
+        Assert.Equal(LinhaDoBoleto, detalhe.Campo("LinhaDigitavel")!.ValorLido);
+        Assert.Equal("189.90", detalhe.Campo("Valor")!.ValorLido);
+        Assert.Equal("2026-10-10", detalhe.Campo("Vencimento")!.ValorLido);
+        Assert.All(detalhe.Campos, campo => Assert.Equal("Estrutura", campo.Origem));
+    }
+
+    /// <summary>
+    /// As duas confiancas respondem perguntas diferentes, e e isso que a separacao compra: aqui o
+    /// arquivo foi lido bem — confianca do texto alta — e o que foi lido nao e boleto nenhum.
+    /// Uma so faria o cartaz legivel e o PDF ilegivel chegarem na fila com a mesma cara.
+    /// </summary>
+    [Fact]
+    public async Task ArquivoLegivelQueNaoEhBoletoTemConfiancaZeroEDeTextoAlta()
+    {
+        var cliente = fabrica.CreateClient();
+        var conta = await cliente.ContaCom(0m);
+        var id = await Enviar(cliente, conta, "Recibo de pagamento. Valor: 80,00. Vencimento 10/10/2026.");
+
+        Assert.True(await UmaRodada());
+
+        var detalhe = await Detalhe(cliente, id);
+
+        Assert.Equal(0m, detalhe!.Confianca);
+        Assert.True(
+            detalhe.ConfiancaDoTexto > 0.5m,
+            $"o texto foi lido bem; confianca do texto foi {detalhe.ConfiancaDoTexto}");
+
+        Assert.Null(detalhe.Campo("LinhaDigitavel"));
+
+        // O que deu para achar fica registrado, para quem for revisar na mao.
+        Assert.Equal("80.00", detalhe.Campo("Valor")!.ValorLido);
+        Assert.Equal("Texto", detalhe.Campo("Valor")!.Origem);
+    }
+
+    /// <summary>
+    /// Boleto cujo valor impresso nao bate com o do codigo de barras: a assinatura do boleto
+    /// adulterado. O valor gravado continua sendo o do codigo, que e o que o banco cobraria, e a
+    /// confianca cai a ponto de nao passar por limiar nenhum.
+    /// </summary>
+    [Fact]
+    public async Task ValorImpressoDivergenteDerrubaAConfiancaDoDocumento()
+    {
+        var cliente = fabrica.CreateClient();
+        var conta = await cliente.ContaCom(0m);
+        var id = await Enviar(cliente, conta, $"Valor do documento: 1.402,77\n{LinhaDoBoleto}");
+
+        Assert.True(await UmaRodada());
+
+        var detalhe = await Detalhe(cliente, id);
+        var valor = detalhe!.Campo("Valor")!;
+
+        Assert.Equal("189.90", valor.ValorLido);
+        Assert.Equal(0.20m, detalhe.Confianca);
+        Assert.NotNull(valor.Observacao);
+
+        // A observacao explica a confianca sem repetir o conteudo do documento.
+        Assert.DoesNotContain("1.402,77", valor.Observacao, StringComparison.Ordinal);
+    }
 
     /// <summary>
     /// Reserva uma linha da fila e devolve o id junto com a transacao ainda aberta, para o
