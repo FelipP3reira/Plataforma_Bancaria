@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json.Serialization;
 using Banco.Api.Configuracao;
 using Banco.Api.Contas;
+using Banco.Api.Documentos;
 using Banco.Api.Transferencias;
 using Scalar.AspNetCore;
 using Serilog;
@@ -41,7 +42,7 @@ construtor.Services.AddCors(opcoes => opcoes.AddPolicy(PoliticaDaWeb, politica =
     .AllowAnyMethod()));
 
 construtor.Services.AddOpenApi();
-construtor.Services.AdicionarBanco();
+construtor.Services.AdicionarBanco(construtor.Configuration);
 
 var aplicacao = construtor.Build();
 
@@ -85,6 +86,7 @@ aplicacao.UseCors(PoliticaDaWeb);
 
 aplicacao.MapearContas();
 aplicacao.MapearExtrato();
+aplicacao.MapearDocumentos();
 aplicacao.MapearEstadoDaConta();
 aplicacao.MapearTransferencias();
 

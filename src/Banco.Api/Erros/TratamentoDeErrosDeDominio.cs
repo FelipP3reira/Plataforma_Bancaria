@@ -64,6 +64,11 @@ public sealed partial class TratamentoDeErrosDeDominio : IExceptionHandler
         ContaNaoEncontradaException => (StatusCodes.Status404NotFound, "Conta nao encontrada"),
         TransferenciaNaoEncontradaException =>
             (StatusCodes.Status404NotFound, "Transferencia nao encontrada"),
+        DocumentoNaoEncontradoException => (StatusCodes.Status404NotFound, "Documento nao encontrado"),
+
+        // 415 e nao 400: o pedido esta bem formado, o que nao serve e o formato do
+        // arquivo. O cliente precisa trocar o arquivo, nao corrigir o pedido.
+        ArquivoRecusadoException => (StatusCodes.Status415UnsupportedMediaType, "Arquivo recusado"),
 
         // 409 e nao 400: o pedido esta bem formado, o que impede e o estado da conta.
         SaldoInsuficienteException => (StatusCodes.Status409Conflict, "Saldo insuficiente"),

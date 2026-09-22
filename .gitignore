@@ -26,3 +26,4 @@ bancada*
 
 # Log de execucao local da API
 *.log
+dados/

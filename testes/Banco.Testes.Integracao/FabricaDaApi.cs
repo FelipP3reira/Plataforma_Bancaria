@@ -29,6 +29,13 @@ public sealed class FabricaDaApi : WebApplicationFactory<Program>, IAsyncLifetim
     public string StringDeConexao => banco.GetConnectionString();
 
     /// <summary>
+    /// Pasta dos documentos, propria desta execucao. Sai junto no fim: teste que deixa
+    /// arquivo para tras faz o proximo passar por motivo errado.
+    /// </summary>
+    public string PastaDeDocumentos { get; } =
+        Path.Combine(Path.GetTempPath(), $"banco-documentos-{Guid.NewGuid():N}");
+
+    /// <summary>
     /// Relogio da API. Comeca na hora de verdade; o teste que precisa de tempo passando
     /// avanca e reinicia depois, ja que o xUnit roda a colecao em sequencia.
     /// </summary>
@@ -48,13 +55,22 @@ public sealed class FabricaDaApi : WebApplicationFactory<Program>, IAsyncLifetim
     {
         await base.DisposeAsync();
         await banco.DisposeAsync();
+
+        try
+        {
+            Directory.Delete(PastaDeDocumentos, recursive: true);
+        }
+        catch (DirectoryNotFoundException)
+        {
+            // Nenhum teste de documento rodou nesta execucao. Nada a limpar.
+        }
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        builder.AplicarConfiguracaoDeTeste(StringDeConexao);
+        builder.AplicarConfiguracaoDeTeste(StringDeConexao, PastaDeDocumentos);
         builder.ConfigureTestServices(servicos => servicos.AddSingleton<TimeProvider>(Relogio));
     }
 }
@@ -62,11 +78,15 @@ public sealed class FabricaDaApi : WebApplicationFactory<Program>, IAsyncLifetim
 internal static class ConfiguracaoDeTeste
 {
     // Entra por ultimo para vencer o .env que o Program carrega na subida.
-    public static void AplicarConfiguracaoDeTeste(this IWebHostBuilder builder, string stringDeConexao) =>
+    public static void AplicarConfiguracaoDeTeste(
+        this IWebHostBuilder builder,
+        string stringDeConexao,
+        string pastaDeDocumentos) =>
         builder.ConfigureAppConfiguration(configuracao => configuracao.AddInMemoryCollection(
             new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Banco"] = stringDeConexao,
+                ["Documentos:Raiz"] = pastaDeDocumentos,
             }));
 }
 
