@@ -16,4 +16,22 @@ public interface IRepositorioDeDocumentos
     Task<Documento?> PorHash(Guid contaId, HashDoArquivo hash, CancellationToken cancelamento);
 
     void Adicionar(Documento documento);
+
+    /// <summary>
+    /// O proximo documento da fila, travado para quem chamou, ou nulo se a fila esta vazia.
+    /// </summary>
+    /// <remarks>
+    /// A trava e obrigatoria: sem ela dois workers leem o mesmo documento e a extracao —
+    /// que e paga por chamada — sai duas vezes. Quem chama precisa estar dentro de uma
+    /// transacao, porque a trava sobrevive exatamente pelo tempo dela.
+    /// </remarks>
+    Task<Documento?> ProximoDaFila(CancellationToken cancelamento);
+
+    /// <summary>
+    /// Os documentos cuja reserva venceu: o worker que os pegou nao voltou.
+    /// </summary>
+    Task<IReadOnlyList<Documento>> ComLeaseVencido(
+        DateTimeOffset agora,
+        int quantidade,
+        CancellationToken cancelamento);
 }

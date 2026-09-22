@@ -44,6 +44,18 @@ internal sealed class DocumentoConfiguracao : IEntityTypeConfiguration<Documento
         documento.Property(linha => linha.RecebidoEm).IsRequired();
         documento.Property(linha => linha.AtualizadoEm).IsRequired();
 
+        documento.Property(linha => linha.Tentativas).IsRequired();
+        documento.Property(linha => linha.UltimoErro).HasMaxLength(Documento.TamanhoMaximoDoErro);
+
+        // Sem limite de tamanho, ao contrario de todo o resto: e texto de documento, e
+        // cortar no meio estragaria justamente o campo que o parser precisa ler.
+        documento.Property(linha => linha.ConteudoExtraido);
+
+        // Quatro casas para um numero entre 0 e 1. Sem precisao explicita o SQL Server
+        // assume decimal(18,2), e toda confianca viraria 0,00 / 0,50 / 1,00 — o limiar de
+        // revisao manual passaria a comparar contra um valor arredondado.
+        documento.Property(linha => linha.Confianca).HasPrecision(5, 4);
+
         // A rede embaixo da conferencia de reenvio. Se dois uploads do mesmo arquivo
         // chegarem juntos, os dois passam pela consulta por hash e o banco recusa o
         // segundo — em vez de a conta ficar com duas extracoes do mesmo boleto.
@@ -54,6 +66,12 @@ internal sealed class DocumentoConfiguracao : IEntityTypeConfiguration<Documento
         // A fila do worker: os mais antigos em cada estado, primeiro.
         documento.HasIndex(linha => new { linha.Estado, linha.RecebidoEm })
             .HasDatabaseName("IX_Documentos_Estado_RecebidoEm");
+
+        // A varredura de reserva vencida roda a cada rodada do worker e quase sempre nao
+        // acha nada. Sem indice, esse "nada" custaria uma varredura da tabela inteira a
+        // cada poucos segundos.
+        documento.HasIndex(linha => new { linha.Estado, linha.LeaseAte })
+            .HasDatabaseName("IX_Documentos_Estado_LeaseAte");
 
         documento.HasOne<Conta>()
             .WithMany()
