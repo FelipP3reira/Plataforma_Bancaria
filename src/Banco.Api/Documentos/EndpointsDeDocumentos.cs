@@ -17,6 +17,8 @@ internal static class EndpointsDeDocumentos
             .WithMetadata(new RequestSizeLimitAttribute(Documento.TamanhoMaximoEmBytes));
 
         documentos.MapGet("/{id:guid}", Detalhar);
+
+        documentos.MapPost("/{id:guid}/reprocessamento", Reprocessar);
     }
 
     /// <summary>
@@ -75,6 +77,23 @@ internal static class EndpointsDeDocumentos
         return recebido.Novo
             ? Results.Accepted($"/documentos/{recebido.Id}", recebido)
             : Results.Ok(recebido);
+    }
+
+    /// <summary>
+    /// Devolve a fila um documento que esgotou as tentativas.
+    /// </summary>
+    /// <remarks>
+    /// 202 e nao 200: a resposta diz que o documento voltou para a fila, e nao que ele foi
+    /// extraido. Quem extrai e o worker, depois.
+    /// </remarks>
+    private static async Task<IResult> Reprocessar(
+        Guid id,
+        ReenfileirarDocumento reenfileirar,
+        CancellationToken cancelamento)
+    {
+        await reenfileirar.Executar(id, cancelamento).ConfigureAwait(false);
+
+        return Results.Accepted($"/documentos/{id}");
     }
 
     private static async Task<IResult> Detalhar(

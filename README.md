@@ -10,6 +10,10 @@ sacando da mesma conta terminando do único jeito certo.
 Completo: conta, ledger, movimentação, transferência atômica, bloqueio, encerramento,
 extrato paginado e o Core de Crédito usando a conta como produto.
 
+Em andamento: a **extração de documentos financeiros** — upload seguro, fila de
+processamento e o worker que consome. Os campos do boleto e a fila de revisão manual são os
+próximos passos.
+
 ```
 POST /contas                        abre conta (nasce zerada e ativa)
 GET  /contas/{id}                   estado, saldo, titular e quantidade de lançamentos
@@ -24,6 +28,10 @@ POST /contas/{id}/desbloqueio       volta a movimentar
 POST /contas/{id}/encerramento      encerra, exigindo saldo zero
 GET  /contas/{id}/estados           a trilha de mudanças de estado
 GET  /transferencias/{id}           uma transferência pelo id
+
+POST /documentos                    envia boleto, nota ou comprovante (multipart)
+GET  /documentos/{id}               estado da extração, confiança e o que foi lido
+POST /documentos/{id}/reprocessamento  devolve à fila um documento que desistiu
 ```
 
 Há uma **interface web** em `web/`: conta, extrato, transferência, empréstimo, bloqueio e
@@ -50,6 +58,15 @@ dotnet tool restore
 dotnet ef database update --project src/Banco.Infraestrutura --startup-project src/Banco.Api
 dotnet run --project src/Banco.Api
 ```
+
+O worker de extração é um segundo processo, e sobe separado:
+
+```bash
+dotnet run --project src/Banco.Worker
+```
+
+Sem ele o upload funciona e o documento fica em `Recebido` para sempre — o que é
+exatamente o que se espera de uma fila sem consumidor.
 
 O SQL Server sobe na porta **1434**, e não na 1433. O [Core de Crédito](https://github.com/FelipP3reira/Core_Credito)
 roda o próprio banco na porta padrão, e os dois sobem juntos quando se quer ver a
@@ -88,6 +105,7 @@ Banco.Dominio          zero dependências. Conta, ledger, dinheiro, número de c
 Banco.Aplicacao        casos de uso e portas (repositório, unidade de trabalho, conciliação).
 Banco.Infraestrutura   EF Core, migrações, a trava pessimista, a consulta de conferência.
 Banco.Api              rotas, validação de borda, tradução de erro.
+Banco.Worker           o laço que consome a fila de extração de documentos.
 ```
 
 A dependência anda em um sentido só: `Api → Aplicacao → Dominio`, e a `Infraestrutura` entra
@@ -458,6 +476,127 @@ hoje. O instante vem do relógio do servidor no momento do pedido, e não do cor
 requisição — deixar o cliente escolher a data de um lançamento seria abrir a porta para
 forjar extrato.
 
+## A extração de documentos
+
+Um boleto entra como arquivo e sai como dado. O caminho é assíncrono de ponta a ponta:
+
+```
+upload → Recebido → Extraindo → Extraido
+                             ↘ RequerRevisao
+                             ↘ Falhou
+```
+
+O upload responde **202** e devolve o id. Não espera a extração: ela passa por serviço de
+terceiro e leva segundos, e prender a requisição do cliente até terminar entregaria tempo
+esgotado justamente nos arquivos grandes — os que mais demoram.
+
+### O tipo do arquivo sai dos bytes, e só deles
+
+Extensão e `Content-Type` são escolhidos por quem envia. Um executável renomeado para
+`.pdf`, com `Content-Type: application/pdf`, chega com as duas coisas perfeitas. O que não dá
+para escolher são os primeiros oito bytes, e é neles que a decisão se apoia.
+
+E é **lista fechada**, não lista de bloqueio: passa PDF, PNG e JPEG, e o resto é recusado.
+Enumerar o que é proibido erra por omissão a cada formato novo que aparece.
+
+A resposta é **415**, e não 400: o pedido está bem formado; o que não serve é o arquivo. Quem
+chamou precisa trocar o arquivo, não corrigir o pedido.
+
+### O nome do arquivo nunca vira caminho
+
+`../../appsettings.json` é um nome de arquivo válido. O caminho em disco é derivado do hash —
+`ab/abc123….pdf` — e o nome original fica só para exibir, depois de perder diretório,
+caractere de controle e o que o sistema de arquivos recusa.
+
+Os dois primeiros caracteres do hash viram pasta. Sem isso, uma base com dezenas de milhares
+de documentos joga todos num diretório só.
+
+E os bytes ficam **fora do webroot**. Documento financeiro dentro de `wwwroot` vira URL
+pública: quem descobrir o nome baixa o boleto de outra pessoa sem passar por lugar nenhum do
+código.
+
+### A idempotência é o hash, e é por conta
+
+A chave não vem de quem chama, ao contrário das movimentações: ela já está no arquivo. O
+SHA-256 do conteúdo identifica o documento melhor do que qualquer texto que o cliente
+inventasse, e não depende de ele lembrar de reenviar a mesma chave. Mesmo boleto duas vezes é
+uma extração só, e o reenvio responde **200** em vez de 202.
+
+Mas é por conta, e não global: duas pessoas podem legitimamente receber o mesmo boleto —
+conta de luz de imóvel dividido — e cada uma paga a sua. O índice único em `(ContaId, Hash)` é
+a rede embaixo da conferência, para o caso de dois uploads simultâneos.
+
+### A fila é o próprio banco
+
+`SELECT` com `WITH (UPDLOCK, READPAST, ROWLOCK)` dentro de uma transação, e a mesma consulta
+que escolhe o documento é a que o reserva. Cada dica faz um trabalho:
+
+- **`UPDLOCK`** pega a trava de atualização já na leitura. Sem ela, dois workers leem o mesmo
+  documento e a extração — que é paga por chamada — sai duas vezes.
+- **`READPAST`** é o que faz a fila ser fila: em vez de esperar pela linha que outro worker
+  travou, o `SELECT` a pula e pega a seguinte. Sem ele, mais processo não dá vazão nenhuma a
+  mais: o segundo worker fica bloqueado atrás do primeiro.
+- **`ROWLOCK`** pede que a trava fique na linha em vez de escalar para a página.
+
+Fila dentro do banco, e não RabbitMQ ou SQS. O banco já está aqui, já é transacional, e a
+trava que serializa dois workers é a mesma que serializa duas transferências. Fila externa
+traria um componente para operar, um ponto de falha e a dúvida de sempre: o que acontece
+quando a mensagem sai da fila e a transação no banco é desfeita. Com a fila dentro do banco,
+essa dúvida não existe.
+
+Passa a valer a pena quando a espera entre chegar e ser processado incomodar, ou quando os
+workers estiverem espalhados em máquinas o bastante para a consulta periódica pesar no banco.
+Nenhum dos dois é o caso aqui.
+
+### A reserva tem prazo, e é isso que recupera worker derrubado
+
+`Extraindo` não é uma bandeira de "em processamento": é uma reserva com validade. Worker que
+morre no meio não devolve nada, e uma bandeira sem prazo deixaria o documento preso até
+alguém notar na mão. Passado o prazo, a varredura recolhe e o documento volta a ser elegível.
+
+A volta **gasta uma tentativa**. Documento que derruba o processo derrubaria o próximo também
+— se a reserva vencida voltasse de graça, ele reiniciaria o worker em laço e nenhum outro
+documento andaria.
+
+Esgotadas as três tentativas, o documento para em `Falhou`. É a dead-letter, sem tabela
+separada: o estado já diz o que aconteceu, e uma tabela à parte precisaria ser mantida em
+sincronia com esta.
+
+### A saída da dead-letter é manual, de propósito
+
+`POST /documentos/{id}/reprocessamento` devolve o documento à fila e zera o contador. O que
+falhou três vezes sozinho falharia na quarta pelo mesmo motivo — reenfileirar automaticamente
+só gastaria chamada paga de extração em laço. Alguém olha, arruma a causa e manda de novo.
+
+A rota **exige** que o documento tenha desistido, e isso é mais estrito do que a máquina de
+estados. A aresta `Extraindo → Recebido` existe para o prazo vencido; sem a guarda, o
+reprocessamento manual pegaria carona nela e arrancaria da mão de um worker um documento que
+ele ainda está extraindo. Esse buraco existia, e foi um teste de unidade que o encontrou.
+
+### O conteúdo extraído não vai para o log
+
+Boleto carrega valor, CNPJ, vencimento e nome. Duas consequências práticas:
+
+- A coluna de erro grava o **tipo** da exceção, nunca a mensagem dela. Mensagem de erro de
+  leitura cita o trecho que não entendeu, e esse trecho é conteúdo de documento.
+- O log de extração bem-sucedida registra o id e a confiança, e nem o texto nem o comprimento
+  dele. Comprimento de campo já diz se o boleto tem valor de três ou de seis dígitos.
+
+Tem teste para isso: o extrator falha com uma mensagem que contém CNPJ e valor, e o teste
+afirma que nenhum dos dois aparece no que ficou gravado.
+
+### O extrator é uma porta, com um provedor local embutido
+
+Enquanto não há provedor de IA configurado, roda o `ExtratorDeEnsaio`: ele lê os trechos de
+texto legível do próprio arquivo, sem chamar serviço nenhum. Não é um extrator de verdade e
+não finge ser — PDF com texto comprimido não devolve nada legível ali. O que ele garante é
+ser **determinístico**, que é o que um teste de fila precisa, e é o que permite clonar o
+repositório e ver o pipeline inteiro rodar sem chave de API.
+
+A confiança que ele devolve é a proporção do arquivo que saiu como texto legível. É a medida
+honesta do que ele conseguiu ler — e é ela que vai fazer PDF comprimido cair na revisão
+manual em vez de passar como extraído.
+
 ## Idempotência
 
 Toda operação financeira exige `Idempotency-Key`. A chave fica gravada na linha do ledger, e
@@ -559,6 +698,12 @@ mostra na tela. No domínio é impedir que o lançamento exista, venha de onde v
 - Saldo insuficiente é 409 e não 400: o pedido está bem formado, o que impede é o estado da
   conta.
 - Toda entrada validada no servidor com FluentValidation, e de novo no agregado.
+- Documento financeiro é aceito por **magic bytes**, em lista fechada, e nunca por extensão
+  ou `Content-Type`. Upload é o vetor de ataque mais comum da feature.
+- Os bytes do documento ficam fora do webroot, com o caminho derivado do hash: nada do que
+  quem enviou escolheu entra no caminho de gravação.
+- O conteúdo extraído nunca vai para log, e a coluna de erro grava o tipo da exceção, não a
+  mensagem dela.
 - Segredos em `.env`, fora do git, com `.env.example` versionado.
 - HSTS e redirecionamento de HTTPS fora de desenvolvimento; `nosniff`, `no-referrer` e
   `DENY` de enquadramento em toda resposta.
@@ -578,10 +723,16 @@ mostra na tela. No domínio é impedir que o lançamento exista, venha de onde v
 - **Reconciliação em lote.** Hoje a conferência é conta a conta, sob demanda. Uma varredura
   periódica de toda a base é outro problema — precisa de janela, de paginação e de um lugar
   para reportar.
+- **Os campos do boleto.** Hoje a extração devolve o texto e uma confiança; ainda não há
+  linha digitável conferida por dígito verificador, valor, vencimento nem CNPJ do emissor.
+- **A fila de revisão manual.** O estado `RequerRevisao` existe na máquina e ninguém entra
+  nele: falta o limiar de confiança configurável e a rota de correção humana.
+- **A rota que baixa o documento.** Os bytes estão fora do webroot justamente para que o
+  único caminho de leitura seja uma rota, e é onde a autorização vai morar.
 - **Limite por IP nas rotas de movimentação.**
 - **Filtro do extrato por tipo, valor ou origem.** Hoje o recorte é só por período.
 - **Extrato em arquivo** (CSV, PDF). Hoje sai só como JSON, pela rota.
-- **Testes da interface.** O back-end tem 167; a web não tem nenhum. O fluxo foi conferido
+- **Testes da interface.** O back-end tem 256; a web não tem nenhum. O fluxo foi conferido
   ponta a ponta com as duas APIs no ar, mas isso é conferência manual, não suíte.
 - **Responsividade em telas pequenas.** A tabela do extrato rola na horizontal e resolve,
   mas não é um layout pensado para celular.

@@ -1,4 +1,8 @@
 using System.Globalization;
+using Banco.Aplicacao.Documentos;
+using Banco.Aplicacao.Portas;
+using Banco.Dominio.Documentos;
+using Banco.Infraestrutura.Documentos;
 using Banco.Infraestrutura.Persistencia;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -41,6 +45,17 @@ public sealed class FabricaDaApi : WebApplicationFactory<Program>, IAsyncLifetim
     /// </summary>
     public RelogioControlado Relogio { get; } = new();
 
+    /// <summary>
+    /// O extrator que a API usa nos testes: o de ensaio de verdade, com uma chave para
+    /// forcar falha.
+    /// </summary>
+    /// <remarks>
+    /// Embrulha o real em vez de substituir por um dubio: assim o caminho feliz exercita o
+    /// extrator que vai para producao quando nao ha provedor configurado, e so o caminho de
+    /// falha e simulado — porque nao existe arquivo que derrube o extrator sob encomenda.
+    /// </remarks>
+    public ExtratorControlado Extrator { get; } = new();
+
     public async Task InitializeAsync()
     {
         await banco.StartAsync();
@@ -71,7 +86,16 @@ public sealed class FabricaDaApi : WebApplicationFactory<Program>, IAsyncLifetim
         ArgumentNullException.ThrowIfNull(builder);
 
         builder.AplicarConfiguracaoDeTeste(StringDeConexao, PastaDeDocumentos);
-        builder.ConfigureTestServices(servicos => servicos.AddSingleton<TimeProvider>(Relogio));
+        builder.ConfigureTestServices(servicos =>
+        {
+            servicos.AddSingleton<TimeProvider>(Relogio);
+            servicos.AddSingleton<IExtratorDeDocumento>(Extrator);
+
+            // O pipeline nao roda na API em producao; quem o hospeda e o worker. Registrado
+            // aqui para o teste poder dar uma rodada por chamada, em vez de subir um
+            // processo e esperar pelo laco.
+            servicos.AddScoped<ExtrairProximoDocumento>();
+        });
     }
 }
 
@@ -88,6 +112,35 @@ internal static class ConfiguracaoDeTeste
                 ["ConnectionStrings:Banco"] = stringDeConexao,
                 ["Documentos:Raiz"] = pastaDeDocumentos,
             }));
+}
+
+/// <summary>O extrator de ensaio com uma chave de falha.</summary>
+public sealed class ExtratorControlado : IExtratorDeDocumento
+{
+    private readonly ExtratorDeEnsaio real = new();
+
+    /// <summary>Quando preenchido, toda extracao falha com esta mensagem.</summary>
+    public string? MensagemDeFalha { get; set; }
+
+    public int Chamadas { get; private set; }
+
+    public void Reiniciar()
+    {
+        MensagemDeFalha = null;
+        Chamadas = 0;
+    }
+
+    public Task<TextoDoDocumento> Extrair(
+        Stream conteudo,
+        TipoDeArquivo tipo,
+        CancellationToken cancelamento)
+    {
+        Chamadas++;
+
+        return MensagemDeFalha is { } mensagem
+            ? throw new InvalidDataException(mensagem)
+            : real.Extrair(conteudo, tipo, cancelamento);
+    }
 }
 
 /// <summary>Relogio real com um deslocamento que o teste controla.</summary>
