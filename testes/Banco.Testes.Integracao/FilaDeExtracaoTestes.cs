@@ -11,9 +11,12 @@ namespace Banco.Testes.Integracao;
 internal sealed record CampoHttp(
     string Nome,
     string ValorLido,
+    string ValorFinal,
     decimal Confianca,
     string Origem,
-    string? Observacao);
+    string? Observacao,
+    string? CorrigidoPor,
+    DateTimeOffset? CorrigidoEm);
 
 internal sealed record DetalheHttp(
     Guid Id,
@@ -24,6 +27,8 @@ internal sealed record DetalheHttp(
     decimal? ConfiancaDoTexto,
     DateTimeOffset? ExtraidoEm,
     string? ConteudoExtraido,
+    Guid? LancamentoDoPagamentoId,
+    DateTimeOffset? PagoEm,
     IReadOnlyList<CampoHttp> Campos)
 {
     public CampoHttp? Campo(string nome) =>
@@ -136,7 +141,7 @@ public class FilaDeExtracaoTestes : IAsyncLifetime
     {
         var cliente = fabrica.CreateClient();
         var conta = await cliente.ContaCom(0m);
-        var id = await Enviar(cliente, conta, "Vencimento 10/10/2026 Valor 189,90");
+        var id = await Enviar(cliente, conta, LinhaDoBoleto);
 
         Assert.True(await UmaRodada());
 
@@ -145,7 +150,7 @@ public class FilaDeExtracaoTestes : IAsyncLifetime
         Assert.Equal("Extraido", detalhe!.Estado);
         Assert.Equal(1, detalhe.Tentativas);
         Assert.NotNull(detalhe.ExtraidoEm);
-        Assert.Contains("Valor 189,90", detalhe.ConteudoExtraido!, StringComparison.Ordinal);
+        Assert.Contains(LinhaDoBoleto, detalhe.ConteudoExtraido!, StringComparison.Ordinal);
         Assert.InRange(detalhe.Confianca!.Value, 0m, 1m);
     }
 
@@ -287,7 +292,7 @@ public class FilaDeExtracaoTestes : IAsyncLifetime
     {
         var cliente = fabrica.CreateClient();
         var conta = await cliente.ContaCom(0m);
-        var id = await Enviar(cliente, conta, "boleto para reprocessar");
+        var id = await Enviar(cliente, conta, $"boleto para reprocessar\n{LinhaDoBoleto}");
 
         fabrica.Extrator.MensagemDeFalha = "provedor fora do ar";
 
