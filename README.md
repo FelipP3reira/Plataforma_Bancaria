@@ -10,9 +10,9 @@ sacando da mesma conta terminando do único jeito certo.
 Completo: conta, ledger, movimentação, transferência atômica, bloqueio, encerramento,
 extrato paginado e o Core de Crédito usando a conta como produto.
 
-Em andamento: a **extração de documentos financeiros** — upload seguro, fila de
-processamento, o worker que consome e os campos do boleto conferidos por dígito verificador. A
-fila de revisão manual é o próximo passo.
+A **extração de documentos financeiros** fecha o ciclo: o boleto entra como arquivo, atravessa
+a fila, vira campos conferidos por dígito verificador, passa por olho humano quando a
+confiança não fecha, e sai como um débito na conta.
 
 ```
 POST /contas                        abre conta (nasce zerada e ativa)
@@ -32,10 +32,13 @@ GET  /transferencias/{id}           uma transferência pelo id
 POST /documentos                    envia boleto, nota ou comprovante (multipart)
 GET  /documentos/{id}               estado, confiança, campos extraídos e o que foi lido
 POST /documentos/{id}/reprocessamento  devolve à fila um documento que desistiu
+GET  /documentos/revisao            a fila de conferência, do menos confiável para o mais
+POST /documentos/{id}/revisao       registra a conferência humana, com as correções
+POST /documentos/{id}/pagamento     debita a conta pelo boleto do documento
 ```
 
-Há uma **interface web** em `web/`: conta, extrato, transferência, empréstimo, bloqueio e
-a conciliação do ledger. E, em desenvolvimento, documentação navegável da API em **`/docs`**
+Há uma **interface web** em `web/`: conta, extrato, transferência, empréstimo, pagamento de
+boleto por upload, bloqueio e a conciliação do ledger. E, em desenvolvimento, documentação navegável da API em **`/docs`**
 — fora de desenvolvimento ela não sobe: o contrato da API não é segredo, mas uma interface
 que dispara requisição de verdade não precisa estar exposta no servidor que guarda dinheiro.
 
@@ -476,6 +479,23 @@ hoje. O instante vem do relógio do servidor no momento do pedido, e não do cor
 requisição — deixar o cliente escolher a data de um lançamento seria abrir a porta para
 forjar extrato.
 
+### A tela do boleto mostra a confiança de cada campo
+
+A porcentagem ao lado de cada campo não é enfeite: ela separa o que foi conferido por dígito
+verificador do que foi achado por formato no texto. Quando alguém corrige um campo, a tela
+continua mostrando embaixo **o que a máquina tinha lido** — é a informação mais útil da tela,
+porque é o que mostra onde a extração erra.
+
+Enquanto o documento está na fila, a tela pergunta de novo a cada três segundos, que é o
+ritmo em que o worker acorda. Consulta periódica e não algo em tempo real de propósito: um
+canal aberto por documento enviado custaria mais do que os poucos segundos de espera que ele
+economizaria.
+
+O `accept` do seletor de arquivos lista PDF, PNG e JPEG, mas isso é comodidade e não
+validação — quem decide é o servidor, pelos primeiros bytes. E o seletor é limpo depois de
+cada envio, senão escolher o **mesmo** arquivo de novo não dispara evento nenhum e a pessoa
+conclui que o app travou.
+
 ## A extração de documentos
 
 Um boleto entra como arquivo e sai como dado. O caminho é assíncrono de ponta a ponta:
@@ -594,8 +614,103 @@ ser **determinístico**, que é o que um teste de fila precisa, e é o que permi
 repositório e ver o pipeline inteiro rodar sem chave de API.
 
 A confiança que ele devolve é a proporção do arquivo que saiu como texto legível. É a medida
-honesta do que ele conseguiu ler — e é ela que vai fazer PDF comprimido cair na revisão
+honesta do que ele conseguiu ler — e é ela que faz PDF comprimido cair na revisão
 manual em vez de passar como extraído.
+
+### A régua de quando escalar para revisão
+
+O limiar de confiança é **configuração**, não regra de domínio. Quem opera aperta a régua
+quando a extração erra demais e afrouxa quando a fila de revisão cresce mais do que dá para
+atender. O padrão de 0,80 deixa passar o boleto cuja linha digitável fecha e cujo CNPJ ficou
+ambíguo, e barra tudo que dependa de valor achado no texto solto.
+
+O encaminhamento acontece no **mesmo método que grava** o resultado da extração, e não num
+passo seguinte. Em dois passos existiria um instante com o documento extraído, confiança
+baixa e ninguém tendo marcado a revisão — e um processo que caísse nesse instante deixaria o
+documento parecendo aprovado.
+
+A comparação é `<` e não `<=`: com o limiar em 1,00, o sinal errado mandaria para a revisão
+também o documento que se confere inteiro, e não existe leitura melhor do que essa.
+
+### A fila é por gravidade, não por ordem de chegada
+
+`GET /documentos/revisao` devolve do menos confiável para o mais. O boleto cujo valor
+impresso não bate com o código de barras precisa ser visto antes do que só tem o CNPJ
+ambíguo.
+
+E ela não pagina por marcador como o extrato. A diferença não é descuido: extrato cresce para
+sempre e é para **navegar**; fila de revisão é para **esvaziar**. Se ela passar do teto
+configurado, o que falta não é mais uma página — é gente, ou uma régua mais solta.
+
+A lista também não devolve o conteúdo extraído nem os valores dos campos, só os motivos e a
+confiança. Ela fica aberta numa tela o dia inteiro, e valor de boleto e CNPJ não precisam
+estar ali: quem for revisar abre o documento.
+
+### A correção fica ao lado do valor lido, nunca no lugar dele
+
+`ValorLido` não muda nunca. Sobrescrever apagaria o único registro do que a máquina errou — e
+é esse registro que responde depois em que campo a extração erra mais, que é a informação que
+diz onde vale a pena melhorar o extrator.
+
+Todo consumidor lê `ValorFinal`, que é o corrigido quando existe e o lido quando não. Quem
+lesse `ValorLido` direto pagaria o valor errado justamente nos documentos que passaram pela
+revisão — os que mais precisavam de cuidado.
+
+**A correção passa pela mesma conferência da leitura automática.** Ela é a única porta por
+onde um valor entra sem ter passado pelo dígito verificador: sem conferir aqui, corrigir a
+linha digitável para qualquer coisa fecharia o documento e o pagamento cobraria o que foi
+digitado. A revisão existe para consertar o que a máquina errou, não para contornar a
+conferência.
+
+Corrigir um campo que a leitura **não** produziu é recusado. Isso não é corrigir, é inventar
+um campo sem nada dizendo de onde ele veio — e o caminho certo nesse caso é o
+reprocessamento.
+
+Confirmar sem corrigir nada é um resultado, e o mais comum: "olhei e está certo". Exigir uma
+correção para poder confirmar levaria quem revisa a inventar uma.
+
+### O boleto vira um débito na conta
+
+`POST /documentos/{id}/pagamento` lê o valor final, debita a conta e fecha o documento em
+`Pago`, que é terminal.
+
+A chave de idempotência é **derivada do documento**, e não pedida a quem chama. Pedir uma
+chave aqui daria ao cliente a chance de mandar uma chave nova para o mesmo boleto — que é
+exatamente o cobrar duas vezes que a chave existe para impedir. Repetir o pedido devolve 200
+com `novo: false` e o mesmo `lancamentoId`.
+
+Ela nasceu derivada do hash do arquivo e **não coube**: `documento:` mais os 64 caracteres de
+um SHA-256 passa do teto de 64 da chave do ledger, e o pagamento morria na validação da
+movimentação. Sair do id não perde força nenhuma, porque o índice único em `(ContaId, Hash)`
+garante que o mesmo conteúdo nunca vira dois documentos na mesma conta: o id já é uma função
+do conteúdo, dentro da conta. Hoje há teste afirmando que a chave cabe no limite.
+
+**A ordem das duas operações importa, e a conferência antes delas também.** O débito vem
+antes de marcar como pago: na ordem inversa, um débito recusado por saldo deixaria o
+documento dizendo que foi pago sem dinheiro nenhum ter saído. E o estado é conferido antes de
+qualquer coisa que mova dinheiro — sem essa conferência, um documento esperando revisão era
+**cobrado** e só então a transição recusava: o dinheiro saía da conta e o documento continuava
+na fila. Foi um teste de integração que encontrou isso, porque ele confere o saldo depois da
+recusa e não só o código de status.
+
+As duas gravações não cabem numa transação só, porque a movimentação abre e confirma a dela —
+e isso é proposital: é ela que segura a trava da conta, e mantê-la enquanto o documento é
+atualizado a estenderia sem motivo. O que fecha a brecha é a chave derivada: um processo que
+morra entre o débito e a marcação deixa o documento em `Extraido`, e o pedido repetido
+reencontra o mesmo lançamento e conclui a marcação.
+
+Conta bloqueada **recebe** documento e não **paga**: receber um boleto não move dinheiro.
+
+### A pasta dos documentos precisa ser caminho absoluto
+
+Isto não é preciosismo de configuração. A API e o worker são processos separados com pastas
+de trabalho diferentes: com `./dados/documentos`, a API resolve contra a pasta dela e o worker
+contra a pasta dele, e o arquivo que uma grava a outra não acha.
+
+Foi exatamente o que aconteceu na primeira subida dos dois juntos — a extração falhou três
+vezes seguidas com `FileNotFoundException` e o documento caiu na dead-letter. Nenhum teste
+pegou, porque a suíte de integração roda um processo só e usa uma pasta temporária absoluta.
+Hoje o armazenamento recusa caminho relativo na subida, com a mensagem dizendo por quê.
 
 ### A estrutura confere o modelo, e não o contrário
 
@@ -818,6 +933,12 @@ mostra na tela. No domínio é impedir que o lançamento exista, venha de onde v
   dele — é o tipo de texto que acaba em tela de suporte. Há teste afirmando as duas coisas.
 - Valor impresso que não bate com o código de barras derruba a confiança a 0,20 em vez de
   escolher um dos dois: é a assinatura do boleto adulterado, e não se resolve com heurística.
+- A correção humana passa pela mesma conferência da leitura automática. É a única porta por
+  onde um valor entra sem ter passado pelo dígito verificador.
+- O estado do documento é conferido **antes** de qualquer coisa que mova dinheiro, e não só na
+  hora de marcar o resultado.
+- A chave de idempotência do pagamento é derivada do documento, e não pedida a quem chama:
+  pedi-la daria ao cliente a chance de mandar uma chave nova para o mesmo boleto.
 - Segredos em `.env`, fora do git, com `.env.example` versionado.
 - HSTS e redirecionamento de HTTPS fora de desenvolvimento; `nosniff`, `no-referrer` e
   `DENY` de enquadramento em toda resposta.
@@ -837,19 +958,18 @@ mostra na tela. No domínio é impedir que o lançamento exista, venha de onde v
 - **Reconciliação em lote.** Hoje a conferência é conta a conta, sob demanda. Uma varredura
   periódica de toda a base é outro problema — precisa de janela, de paginação e de um lugar
   para reportar.
-- **A fila de revisão manual.** O estado `RequerRevisao` existe na máquina e ninguém entra
-  nele: falta o limiar de confiança configurável e a rota de correção humana. É onde os
-  documentos de confiança baixa vão parar, e hoje eles ficam em `Extraido` sem ninguém olhar.
-- **O pagamento do boleto.** Os campos já saem prontos para cobrar, mas nada liga o documento
-  confirmado a um saque na conta.
+- **Um extrator de verdade.** O `ExtratorDeEnsaio` lê só texto ASCII solto no arquivo: PDF com
+  texto comprimido e foto de boleto não devolvem nada legível. A porta `IExtratorDeDocumento`
+  está pronta para um provedor de OCR ou de visão atrás dela, com a chave em variável de
+  ambiente.
+- **A rota que baixa o documento.** Os bytes estão fora do webroot justamente para que o único
+  caminho de leitura seja uma rota, e é onde a autorização vai morar.
 - **Conta de concessionária** (48 algarismos). Recusada explicitamente hoje, com mensagem
   dizendo o que é — o padrão é outro e merece o próprio leitor.
-- **A rota que baixa o documento.** Os bytes estão fora do webroot justamente para que o
-  único caminho de leitura seja uma rota, e é onde a autorização vai morar.
 - **Limite por IP nas rotas de movimentação.**
 - **Filtro do extrato por tipo, valor ou origem.** Hoje o recorte é só por período.
 - **Extrato em arquivo** (CSV, PDF). Hoje sai só como JSON, pela rota.
-- **Testes da interface.** O back-end tem 338; a web não tem nenhum. O fluxo foi conferido
+- **Testes da interface.** O back-end tem 385; a web não tem nenhum. O fluxo foi conferido
   ponta a ponta com as duas APIs no ar, mas isso é conferência manual, não suíte.
 - **Responsividade em telas pequenas.** A tabela do extrato rola na horizontal e resolve,
   mas não é um layout pensado para celular.

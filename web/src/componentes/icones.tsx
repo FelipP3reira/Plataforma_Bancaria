@@ -1,7 +1,7 @@
 /**
  * Ícones desenhados aqui, e não trazidos de uma biblioteca.
  *
- * São nove traços simples; uma dependência inteira para isso custaria mais em peso e em
+ * São alguns traços simples; uma dependência inteira para isso custaria mais em peso e em
  * superfície de atualização do que custa mantê-los. Todos herdam `currentColor` e o
  * tamanho vem do CSS, para que a cor de um ícone seja a cor do texto ao lado dele.
  */
@@ -99,6 +99,12 @@ export const Mais = (p: Props) => (
 export const Seta = (p: Props) => (
   <Svg {...p}>
     <path d="M9 5l7 7-7 7" />
+  </Svg>
+);
+
+export const Papel = (p: Props) => (
+  <Svg {...p}>
+    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M9 13h6M9 17h4" />
   </Svg>
 );
 

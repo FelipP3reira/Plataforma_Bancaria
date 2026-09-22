@@ -5,6 +5,7 @@ import * as Icone from "./componentes/icones";
 import { Marca } from "./componentes/marca";
 import * as sessaoGuardada from "./sessao";
 import type { Sessao } from "./sessao";
+import Boletos from "./telas/Boletos";
 import Emprestimos from "./telas/Emprestimos";
 import Entrada from "./telas/Entrada";
 import Extrato from "./telas/Extrato";
@@ -14,6 +15,7 @@ import Seguranca from "./telas/Seguranca";
 const ABAS = [
   { nome: "Conta", Icone: Icone.Casa },
   { nome: "Extrato", Icone: Icone.Lista },
+  { nome: "Boletos", Icone: Icone.Papel },
   { nome: "Empréstimos", Icone: Icone.Cedula },
   { nome: "Segurança", Icone: Icone.Escudo },
 ] as const;
@@ -141,6 +143,8 @@ export default function App() {
             <Painel conta={conta} sessao={sessao} aoMudar={recarregar} />
           ) : aba === "Extrato" ? (
             <Extrato contaId={conta.id} />
+          ) : aba === "Boletos" ? (
+            <Boletos sessao={sessao} aoMudarSaldo={recarregar} />
           ) : aba === "Empréstimos" ? (
             <Emprestimos sessao={sessao} aoMudarSaldo={recarregar} />
           ) : (

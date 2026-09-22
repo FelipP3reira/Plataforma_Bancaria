@@ -25,6 +25,19 @@ public sealed class ArmazenamentoEmDisco : IArmazenamentoDeDocumentos
     public ArmazenamentoEmDisco(IOptions<OpcoesDeArmazenamento> opcoes)
     {
         ArgumentNullException.ThrowIfNull(opcoes);
+
+        // Absoluto, e nao relativo. A API e o worker sao processos separados com pastas de
+        // trabalho diferentes: com "./dados/documentos", cada um resolve contra a sua e o
+        // arquivo que a API grava o worker nao encontra. A falha nao aparece em teste de um
+        // processo so, e em producao ela apareceria como extracao falhando em tudo.
+        if (!Path.IsPathRooted(opcoes.Value.Raiz))
+        {
+            throw new InvalidOperationException(
+                $"Documentos:Raiz precisa ser caminho absoluto, e veio '{opcoes.Value.Raiz}'. "
+                + "A API e o worker compartilham esta pasta e resolvem caminho relativo contra "
+                + "pastas de trabalho diferentes.");
+        }
+
         raiz = Path.GetFullPath(opcoes.Value.Raiz);
     }
 
